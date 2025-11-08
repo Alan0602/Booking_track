@@ -2,37 +2,33 @@
 import { useState, useMemo } from "react";
 import { useNavigate } from "react-router-dom";
 import DashboardLayout from "../components/DashboardLayout";
-import { useWallet } from "../context/WalletContext";
+import { useWallet, WALLET_KEYS } from "../context/WalletContext";
 import { useAuth } from "../context/AuthContext";
 import { motion, AnimatePresence } from "framer-motion";
 import {
   ArrowLeft,
   Plus,
   Minus,
-  DollarSign,
-  CheckCircle,
   Wallet as WalletIcon,
+  CheckCircle,
   Clock,
   User,
-  TrendingUp,
   Copy,
   IndianRupee,
 } from "lucide-react";
 import { format } from "date-fns";
 
 const walletOptions = [
-  { value: "alhind", label: "AlHind", color: "from-emerald-400 to-teal-600" },
-  { value: "akbar", label: "Akbar", color: "from-purple-400 to-indigo-600" },
-  { value: "office", label: "Office Fund", color: "from-amber-400 to-orange-600" },
+  { value: WALLET_KEYS.ALHIND, label: "AlHind", color: "from-emerald-400 to-teal-600" },
+  { value: WALLET_KEYS.AKBAR, label: "Akbar", color: "from-purple-400 to-indigo-600" },
+  { value: WALLET_KEYS.OFFICE, label: "Office Fund", color: "from-amber-400 to-orange-600" },
 ];
 
 export default function AddWalletAmount() {
   const {
     addToWallet,
     deductFromWallet,
-    logTransaction,
     transactions,
-    walletData,
     getWallet,
     formatWallet,
   } = useWallet();
@@ -47,18 +43,12 @@ export default function AddWalletAmount() {
   });
   const [errors, setErrors] = useState({});
   const [success, setSuccess] = useState(false);
+  const [successMessage, setSuccessMessage] = useState(""); // ← NEW: Custom message
   const [submitting, setSubmitting] = useState(false);
   const [copied, setCopied] = useState("");
 
-  // Get current balance (NUMBER)
-  const currentBalance = useMemo(() => {
-    return getWallet(form.wallet);
-  }, [form.wallet, getWallet]);
-
-  // Formatted balance for UI
-  const formattedBalance = useMemo(() => {
-    return formatWallet(form.wallet);
-  }, [form.wallet, formatWallet]);
+  const currentBalance = useMemo(() => getWallet(form.wallet), [form.wallet, getWallet]);
+  const formattedBalance = useMemo(() => formatWallet(form.wallet), [form.wallet, formatWallet]);
 
   const validate = () => {
     const e = {};
@@ -79,31 +69,35 @@ export default function AddWalletAmount() {
     setSubmitting(true);
     try {
       const amount = Number(form.amount);
-      const operation = form.mode === "add" ? "add" : "deduct";
+      const walletLabel = walletOptions.find(w => w.value === form.wallet)?.label || "Wallet";
 
-      if (operation === "add") {
+      if (form.mode === "add") {
         addToWallet(form.wallet, amount, form.name.trim());
+        setSuccessMessage(`₹${amount.toFixed(2)} added to ${walletLabel}!`);
       } else {
         deductFromWallet(form.wallet, amount, form.name.trim());
+        setSuccessMessage(`₹${amount.toFixed(2)} deducted from ${walletLabel}!`);
       }
-
-      logTransaction(form.wallet, amount, operation, form.name.trim());
 
       setSuccess(true);
       setTimeout(() => {
         setSuccess(false);
+        setSuccessMessage("");
         setForm({ ...form, amount: "", name: user?.name || "" });
-      }, 1500);
+      }, 2000);
     } catch (err) {
-      alert(err.message);
+      alert(err.message || "Transaction failed");
     } finally {
       setSubmitting(false);
     }
   };
 
   const recentTransactions = useMemo(() => {
-    return transactions.slice(-6).reverse();
-  }, [transactions]);
+    return transactions
+      .filter(t => t.walletKey === form.wallet)
+      .slice(-6)
+      .reverse();
+  }, [transactions, form.wallet]);
 
   const copyBalance = () => {
     navigator.clipboard.writeText(formattedBalance);
@@ -150,17 +144,18 @@ export default function AddWalletAmount() {
                 <h2 className="text-2xl font-bold text-gray-900">Update Wallet</h2>
               </div>
 
+              {/* SUCCESS MESSAGE */}
               <AnimatePresence mode="wait">
                 {success && (
                   <motion.div
-                    initial={{ opacity: 0, scale: 0.9 }}
-                    animate={{ opacity: 1, scale: 1 }}
-                    exit={{ opacity: 0, scale: 0.9 }}
-                    className="mb-6 p-4 bg-emerald-50 border border-emerald-200 rounded-xl flex items-center gap-3 text-emerald-700"
+                    initial={{ opacity: 0, scale: 0.9, y: -10 }}
+                    animate={{ opacity: 1, scale: 1, y: 0 }}
+                    exit={{ opacity: 0, scale: 0.9, y: -10 }}
+                    className="mb-6 p-4 bg-gradient-to-r from-emerald-50 to-teal-50 border border-emerald-200 rounded-xl flex items-center gap-3 text-emerald-700 shadow-md"
                   >
-                    <CheckCircle size={24} />
+                    <CheckCircle size={28} className="text-emerald-600" />
                     <div>
-                      <p className="font-semibold">Success!</p>
+                      <p className="font-bold text-lg">{successMessage}</p>
                       <p className="text-sm">Wallet updated successfully.</p>
                     </div>
                   </motion.div>
@@ -243,7 +238,7 @@ export default function AddWalletAmount() {
                     className="p-4 bg-gradient-to-r from-indigo-50 to-purple-50 rounded-xl flex items-center justify-between"
                   >
                     <div className="flex items-center gap-2">
-                      <DollarSign size={18} className="text-indigo-600" />
+                      <IndianRupee size={18} className="text-indigo-600" />
                       <span className="text-sm font-medium text-gray-700">Current Balance</span>
                     </div>
                     <div className="flex items-center gap-2">
@@ -346,7 +341,7 @@ export default function AddWalletAmount() {
                     <Clock size={36} className="text-gray-400" />
                   </div>
                   <p className="text-gray-500">No transactions yet.</p>
-                  <p className="text-sm text-gray-400 mt-1">Start adding or deducting funds.</p>
+                  <p className="text-sm text-gray-400 mt-1">Select a wallet to view activity.</p>
                 </div>
               ) : (
                 <div className="space-y-4">
@@ -379,7 +374,9 @@ export default function AddWalletAmount() {
                         }`}>
                           {t.operation === "credit" ? "+" : "-"}₹{t.amount.toFixed(2)}
                         </p>
-                        <p className="text-xs text-gray-500 capitalize">{t.walletKey}</p>
+                        <p className="text-xs text-gray-500 capitalize">
+                          {walletOptions.find(w => w.value === t.walletKey)?.label}
+                        </p>
                       </div>
                     </motion.div>
                   ))}

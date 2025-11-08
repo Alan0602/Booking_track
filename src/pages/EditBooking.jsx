@@ -1,9 +1,9 @@
 // src/pages/EditBooking.jsx
-import { useState, useMemo, useEffect } from "react";
+import { useState, useMemo, useEffect, useRef } from "react";
 import { useNavigate, useParams } from "react-router-dom";
 import DashboardLayout from "../components/DashboardLayout";
 import { useBooking, CATEGORY, STATUS } from "../context/BookingContext";
-import { useWallet } from "../context/WalletContext";
+import { useWallet, PLATFORM, WALLET_KEYS } from "../context/WalletContext";
 import { motion } from "framer-motion";
 import {
   ArrowLeft, Save, User, Mail, Calendar, IndianRupee, CheckCircle,
@@ -11,7 +11,6 @@ import {
 } from "lucide-react";
 import { format } from "date-fns";
 
-// Categories & Platforms (unchanged)
 const categories = [
   { value: CATEGORY.FLIGHT, label: "Flight", icon: Plane, color: "bg-blue-100 text-blue-700" },
   { value: CATEGORY.BUS,    label: "Bus",    icon: Bus,     color: "bg-emerald-100 text-emerald-700" },
@@ -22,33 +21,31 @@ const categories = [
 
 const platforms = [
   { value: "", label: "Select Platform" },
-  { value: "Alhind", label: "AlHind", walletKey: "alhind" },
-  { value: "Akbar", label: "Akbar", walletKey: "akbar" },
-  { value: "Direct", label: "Direct", walletKey: null },
+  { value: PLATFORM.ALHIND, label: "AlHind", walletKey: WALLET_KEYS.ALHIND },
+  { value: PLATFORM.AKBAR, label: "Akbar", walletKey: WALLET_KEYS.AKBAR },
+  { value: PLATFORM.DIRECT, label: "Direct", walletKey: null },
 ];
 
 const countryCodes = [
-  { code: "+91", country: "India", flag: "India" },
-  { code: "+1", country: "USA", flag: "USA" },
-  { code: "+44", country: "UK", flag: "UK" },
-  { code: "+971", country: "UAE", flag: "UAE" },
-  { code: "+966", country: "Saudi Arabia", flag: "Saudi Arabia" },
-  { code: "+974", country: "Qatar", flag: "Qatar" },
-  { code: "+965", country: "Kuwait", flag: "Kuwait" },
-  { code: "+968", country: "Oman", flag: "Oman" },
-  { code: "+973", country: "Bahrain", flag: "Bahrain" },
-  { code: "+61", country: "Australia", flag: "Australia" },
+  { code: "+91", country: "India", flag: "IN" },
+  { code: "+1", country: "USA", flag: "US" },
+  { code: "+44", country: "UK", flag: "GB" },
+  { code: "+971", country: "UAE", flag: "AE" },
+  { code: "+966", country: "Saudi Arabia", flag: "SA" },
+  { code: "+974", country: "Qatar", flag: "QA" },
+  { code: "+965", country: "Kuwait", flag: "KW" },
+  { code: "+968", country: "Oman", flag: "OM" },
+  { code: "+973", country: "Bahrain", flag: "BH" },
+  { code: "+61", country: "Australia", flag: "AU" },
 ];
 
 export default function EditBooking() {
   const { updateBooking, getBookingById } = useBooking();
-  const { 
-    reverseBookingWallet, 
-    applyBookingWallet, 
-    walletData 
-  } = useWallet();
+  const { reverseBookingWallet, applyBookingWallet, getWallet } = useWallet();
   const navigate = useNavigate();
   const { id } = useParams();
+
+  const dropdownRef = useRef(null);
 
   const [form, setForm] = useState({
     customerName: "",
@@ -70,7 +67,7 @@ export default function EditBooking() {
   const [success, setSuccess] = useState(false);
   const [walletError, setWalletError] = useState("");
 
-  // Load existing booking
+  // Load booking
   useEffect(() => {
     const booking = getBookingById(id);
     if (!booking) {
@@ -81,10 +78,10 @@ export default function EditBooking() {
     let code = "+91";
     let number = "";
     if (booking.contactNumber) {
-      const parts = booking.contactNumber.split(" ");
-      if (parts[0].startsWith("+")) {
-        code = parts[0];
-        number = parts.slice(1).join(" ");
+      const match = booking.contactNumber.match(/^(\+\d+)\s(.+)$/);
+      if (match) {
+        code = match[1];
+        number = match[2];
       } else {
         number = booking.contactNumber;
       }
@@ -96,44 +93,52 @@ export default function EditBooking() {
       contactNumber: number,
       selectedCountryCode: code,
       date: format(new Date(booking.date), "yyyy-MM-dd"),
-      basePay: booking.basePay.toString() || "",
-      commissionAmount: booking.commissionAmount.toString() || "",
-      markupAmount: booking.markupAmount.toString() || "",
+      basePay: booking.basePay?.toString() || "",
+      commissionAmount: booking.commissionAmount?.toString() || "",
+      markupAmount: booking.markupAmount?.toString() || "",
       platform: booking.platform || "",
       status: booking.status || STATUS.PENDING,
       category: booking.category || CATEGORY.FLIGHT,
     });
   }, [id, getBookingById, navigate]);
 
+  // Close dropdown
+  useEffect(() => {
+    const handleClick = (e) => {
+      if (dropdownRef.current && !dropdownRef.current.contains(e.target)) {
+        setShowCountryDropdown(false);
+      }
+    };
+    document.addEventListener("mousedown", handleClick);
+    return () => document.removeEventListener("mousedown", handleClick);
+  }, []);
+
   const fullContact = `${form.selectedCountryCode} ${form.contactNumber}`.trim();
+  const isDirect = form.platform === PLATFORM.DIRECT;
+  const isConfirmed = form.status === STATUS.CONFIRMED;
+
+  const formatBalance = (amount) => Number(amount || 0).toFixed(2);
 
   const totalRevenue = useMemo(() => {
     const base = parseFloat(form.basePay) || 0;
     const comm = parseFloat(form.commissionAmount) || 0;
     const mark = parseFloat(form.markupAmount) || 0;
-    return (base + comm + mark).toFixed(2);
+    return formatBalance(base + comm + mark);
   }, [form.basePay, form.commissionAmount, form.markupAmount]);
 
   const netProfit = useMemo(() => {
     const comm = parseFloat(form.commissionAmount) || 0;
     const mark = parseFloat(form.markupAmount) || 0;
-    return (comm + mark).toFixed(2);
-  }, [form.commissionAmount, form.markupAmount]);
+    return isDirect ? formatBalance(parseFloat(form.basePay) + mark) : formatBalance(comm + mark);
+  }, [form.basePay, form.commissionAmount, form.markupAmount, isDirect]);
 
-  const basePayDisplay = useMemo(() => (parseFloat(form.basePay) || 0).toFixed(2), [form.basePay]);
-  const commissionDisplay = useMemo(() => (parseFloat(form.commissionAmount) || 0).toFixed(2), [form.commissionAmount]);
-  const markupDisplay = useMemo(() => (parseFloat(form.markupAmount) || 0).toFixed(2), [form.markupAmount]);
-
-  const getPlatformWalletBalance = () => {
-    if (!form.platform || form.platform === "Direct") return null;
-    const platform = platforms.find(p => p.value === form.platform);
-    if (!platform?.walletKey) return null;
-    const wallet = walletData.find(w => w.key === platform.walletKey);
-    return wallet ? wallet.amount : 0;
-  };
-
-  const platformBalance = getPlatformWalletBalance();
   const baseAmount = parseFloat(form.basePay) || 0;
+
+  const platformBalance = useMemo(() => {
+    if (!form.platform || isDirect) return null;
+    const p = platforms.find(p => p.value === form.platform);
+    return p?.walletKey ? getWallet(p.walletKey) : null;
+  }, [form.platform, getWallet, isDirect]);
 
   const validate = () => {
     const e = {};
@@ -144,17 +149,15 @@ export default function EditBooking() {
     if (!form.date) e.date = "Date is required";
 
     const digitsOnly = form.contactNumber.replace(/\D/g, "");
-    if (digitsOnly.length < 10) {
-      e.contactNumber = "Contact number must have at least 10 digits";
-    }
+    if (digitsOnly.length < 10) e.contactNumber = "Contact number must have at least 10 digits";
 
     if (form.basePay && Number(form.basePay) < 0) e.basePay = "Base pay cannot be negative";
     if (form.commissionAmount && Number(form.commissionAmount) < 0) e.commissionAmount = "Commission cannot be negative";
     if (form.markupAmount && Number(form.markupAmount) < 0) e.markupAmount = "Markup cannot be negative";
 
-    if (form.platform && form.platform !== "Direct" && platformBalance !== null && baseAmount > 0) {
+    if (isConfirmed && !isDirect && platformBalance !== null && baseAmount > 0) {
       if (platformBalance < baseAmount) {
-        e.basePay = `Insufficient balance in ${form.platform}. Available: ₹${platformBalance.toFixed(2)}`;
+        e.basePay = `Insufficient balance in ${form.platform}. Available: ₹${formatBalance(platformBalance)}`;
       }
     }
 
@@ -181,26 +184,37 @@ export default function EditBooking() {
       const comm = Number(form.commissionAmount) || 0;
       const mark = Number(form.markupAmount) || 0;
       const totalRevenueValue = base + comm + mark;
-      const netProfitValue = comm + mark;
+      const netProfitValue = isDirect ? base + mark : comm + mark;
 
       const user = form.customerName.trim() || "Unknown";
 
-      // === WALLET: Reverse old + Apply new ===
-      reverseBookingWallet(oldBooking, user);
-      applyBookingWallet(
-        { ...oldBooking, basePay: base, commissionAmount: comm, markupAmount: mark, platform: form.platform },
-        user
-      );
+      // === WALLET: Reverse old ===
+      if (oldBooking.status === STATUS.CONFIRMED) {
+        reverseBookingWallet(oldBooking, user);
+      }
 
-      // === EDIT HISTORY: Add entry ===
+      // === WALLET: Apply new (only if Confirmed) ===
+      if (isConfirmed) {
+        const newBookingData = {
+          ...oldBooking,
+          basePay: base,
+          commissionAmount: comm,
+          markupAmount: mark,
+          platform: form.platform || PLATFORM.DIRECT,
+          status: STATUS.CONFIRMED,
+        };
+        applyBookingWallet(newBookingData, user);
+      }
+
+      // === Edit History ===
       const editEntry = {
         timestamp: new Date().toISOString(),
         user,
         action: "edit",
-        changes: [], // Optional: diff old vs new
+        changes: [], // Optional: add diff logic
       };
 
-      // === FINAL BOOKING OBJECT ===
+      // === Final Updated Booking ===
       const updatedBooking = {
         ...oldBooking,
         customerName: form.customerName.trim(),
@@ -212,13 +226,10 @@ export default function EditBooking() {
         markupAmount: mark,
         totalRevenue: totalRevenueValue,
         netProfit: netProfitValue,
-        platform: form.platform || "Direct",
+        platform: form.platform || PLATFORM.DIRECT,
         status: form.status,
         category: form.category,
-        editHistory: [
-          ...(oldBooking.editHistory || []),
-          editEntry
-        ],
+        editHistory: [...(oldBooking.editHistory || []), editEntry],
       };
 
       updateBooking(updatedBooking);
@@ -260,9 +271,7 @@ export default function EditBooking() {
           {walletError && (
             <motion.div initial={{ opacity: 0, scale: 0.9 }} animate={{ opacity: 1, scale: 1 }} className="mb-6 p-4 bg-red-50 border border-red-200 rounded-xl flex items-center gap-3 text-red-700">
               <AlertCircle size={24} />
-              <div>
-                <p className="font-semibold">{walletError}</p>
-              </div>
+              <p className="font-semibold">{walletError}</p>
             </motion.div>
           )}
 
@@ -288,17 +297,11 @@ export default function EditBooking() {
                 </label>
                 <div className="grid grid-cols-3 sm:grid-cols-5 gap-3">
                   {categories.map((cat) => (
-                    <label key={cat.value} className={`flex flex-col items-center p-4 rounded-xl border-2 cursor-pointer transition-all ${form.category === cat.value ? "border-blue-500 bg-blue-50" : "border-gray-300 hover:border-blue-300"}`}>
-                      <cat.icon size={24} className="mb-2" />
-                      <span className="text-sm font-medium">{cat.label}</span>
-                      <input
-                        type="radio"
-                        name="category"
-                        value={cat.value}
-                        checked={form.category === cat.value}
-                        onChange={(e) => setForm({ ...form, category: e.target.value })}
-                        className="hidden"
-                      />
+                    <label key={cat.value} className={`flex flex-col items-center p-4 rounded-xl border-2 cursor-pointer transition-all ${form.category === cat.value ? "border-blue-500 bg-blue-50" : "border-gray-300 hover:border-gray-400"}`}>
+                      <input type="radio" name="category" value={cat.value} checked={form.category === cat.value}
+                        onChange={(e) => setForm({ ...form, category: e.target.value })} className="sr-only" />
+                      <cat.icon size={28} className={`mb-2 ${cat.color}`} />
+                      <span className="text-xs sm:text-sm font-medium">{cat.label}</span>
                     </label>
                   ))}
                 </div>
@@ -306,96 +309,88 @@ export default function EditBooking() {
 
               {/* Platform */}
               <div>
-                <label className="flex items-center gap-2 text-sm font-semibold text-gray-700 mb-2"><Globe size={18} /> Platform</label>
-                <select value={form.platform} onChange={(e) => setForm({ ...form, platform: e.target.value })} className={`w-full px-4 py-3 rounded-xl border ${errors.platform ? "border-red-500" : "border-gray-300"} bg-white focus:ring-2 focus:ring-blue-500 focus:border-blue-500 transition text-base`} disabled={submitting}>
-                  {platforms.map((p) => <option key={p.value} value={p.value}>{p.label}</option>)}
+                <label className="flex items-center gap-2 text-sm font-semibold text-gray-700 mb-2">
+                  <Globe size={18} /> Booking Platform
+                </label>
+                <select
+                  value={form.platform}
+                  onChange={(e) => setForm({ ...form, platform: e.target.value })}
+                  className="w-full px-4 py-3 rounded-xl border border-gray-300 bg-white focus:ring-2 focus:ring-blue-500 focus:border-blue-500 transition text-base"
+                  disabled={submitting}
+                >
+                  {platforms.map((p) => (
+                    <option key={p.value} value={p.value}>{p.label}</option>
+                  ))}
                 </select>
               </div>
 
-              {/* Customer Name */}
+              {/* Customer Info */}
               <div>
                 <label className="flex items-center gap-2 text-sm font-semibold text-gray-700 mb-2"><User size={18} /> Customer Name</label>
-                <input type="text" value={form.customerName} onChange={(e) => setForm({ ...form, customerName: e.target.value })} className={`w-full px-4 py-3 rounded-xl border ${errors.customerName ? "border-red-500" : "border-gray-300"} bg-white focus:ring-2 focus:ring-blue-500 focus:border-blue-500 transition text-base`} placeholder="John Doe" disabled={submitting} />
+                <input type="text" value={form.customerName} onChange={(e) => setForm({ ...form, customerName: e.target.value })}
+                  className={`w-full px-4 py-3 rounded-xl border ${errors.customerName ? "border-red-500" : "border-gray-300"} bg-white focus:ring-2 focus:ring-blue-500 focus:border-blue-500 transition text-base`} placeholder="John Doe" disabled={submitting} />
                 {errors.customerName && <p className="mt-1 text-sm text-red-600">{errors.customerName}</p>}
               </div>
 
-              {/* Email */}
               <div>
                 <label className="flex items-center gap-2 text-sm font-semibold text-gray-700 mb-2"><Mail size={18} /> Email</label>
-                <input type="email" value={form.email} onChange={(e) => setForm({ ...form, email: e.target.value })} className={`w-full px-4 py-3 rounded-xl border ${errors.email ? "border-red-500" : "border-gray-300"} bg-white focus:ring-2 focus:ring-blue-500 focus:border-blue-500 transition text-base`} placeholder="john@example.com" disabled={submitting} />
+                <input type="email" value={form.email} onChange={(e) => setForm({ ...form, email: e.target.value })}
+                  className={`w-full px-4 py-3 rounded-xl border ${errors.email ? "border-red-500" : "border-gray-300"} bg-white focus:ring-2 focus:ring-blue-500 focus:border-blue-500 transition text-base`} placeholder="john@example.com" disabled={submitting} />
                 {errors.email && <p className="mt-1 text-sm text-red-600">{errors.email}</p>}
               </div>
 
-              {/* Contact Number */}
               <div>
-                <label className="flex items-center gap-2 text-sm font-semibold text-gray-700 mb-2"><Phone size={18} /> Contact Number</label>
-                <div className="flex">
-                  <div className="relative">
-                    <button
-                      type="button"
-                      onClick={() => setShowCountryDropdown(!showCountryDropdown)}
-                      className="flex items-center gap-2 px-3 py-3 rounded-l-xl border border-gray-300 bg-gray-50 hover:bg-gray-100 transition text-sm font-medium"
-                    >
-                      <span className="text-lg">{countryCodes.find(c => c.code === form.selectedCountryCode)?.flag}</span>
-                      <span>{form.selectedCountryCode}</span>
-                      <ChevronDown size={16} className={`transition-transform ${showCountryDropdown ? "rotate-180" : ""}`} />
-                    </button>
+                <label className="flex items-center gap-2 text-sm font-semibold text-gray-700 mb-2">
+                  <Phone size={18} /> Contact Number
+                </label>
+                <div className="flex gap-0" ref={dropdownRef}>
+                  <button type="button" onClick={() => setShowCountryDropdown(!showCountryDropdown)}
+                    className="flex items-center gap-1.5 px-3 py-3 bg-gray-50 border border-gray-300 rounded-l-xl hover:bg-gray-100 transition whitespace-nowrap text-sm font-medium text-gray-700"
+                    disabled={submitting}>
+                    <span className="text-lg">{countryCodes.find(c => c.code === form.selectedCountryCode)?.flag}</span>
+                    <span>{form.selectedCountryCode}</span>
+                    <ChevronDown size={16} className={`transition-transform ${showCountryDropdown ? "rotate-180" : ""}`} />
+                  </button>
 
-                    {showCountryDropdown && (
-                      <motion.div
-                        initial={{ opacity: 0, y: -8 }}
-                        animate={{ opacity: 1, y: 0 }}
-                        className="absolute top-full left-0 mt-1 w-48 bg-white rounded-xl shadow-xl border border-gray-200 overflow-hidden z-10"
-                      >
-                        {countryCodes.map((c) => (
-                          <button
-                            key={c.code}
-                            type="button"
-                            onClick={() => {
-                              setForm({ ...form, selectedCountryCode: c.code });
-                              setShowCountryDropdown(false);
-                            }}
-                            className={`w-full text-left px-3 py-2.5 flex items-center gap-2 hover:bg-gray-50 transition text-sm ${form.selectedCountryCode === c.code ? "bg-blue-50 text-blue-700 font-medium" : "text-gray-700"}`}
-                          >
-                            <span className="text-lg">{c.flag}</span>
-                            <span>{c.country}</span>
-                            <span className="ml-auto text-gray-500">{c.code}</span>
-                          </button>
-                        ))}
-                      </motion.div>
-                    )}
-                  </div>
+                  {showCountryDropdown && (
+                    <motion.div initial={{ opacity: 0, y: -8 }} animate={{ opacity: 1, y: 0 }}
+                      className="absolute top-full left-0 mt-1 w-48 bg-white rounded-xl shadow-xl border border-gray-200 overflow-hidden z-10">
+                      {countryCodes.map((c) => (
+                        <button key={c.code} type="button"
+                          onClick={() => { setForm({ ...form, selectedCountryCode: c.code }); setShowCountryDropdown(false); }}
+                          className={`w-full text-left px-3 py-2.5 flex items-center gap-2 hover:bg-gray-50 transition text-sm ${form.selectedCountryCode === c.code ? "bg-blue-50 text-blue-700 font-medium" : "text-gray-700"}`}>
+                          <span className="text-lg">{c.flag}</span>
+                          <span>{c.country}</span>
+                          <span className="ml-auto text-gray-500">{c.code}</span>
+                        </button>
+                      ))}
+                    </motion.div>
+                  )}
 
-                  <input
-                    type="text"
-                    value={form.contactNumber}
-                    onChange={(e) => {
-                      const val = e.target.value.replace(/[^\d]/g, "");
-                      setForm({ ...form, contactNumber: val });
-                    }}
+                  <input type="text" value={form.contactNumber}
+                    onChange={(e) => { const val = e.target.value.replace(/[^\d]/g, ""); setForm({ ...form, contactNumber: val }); }}
                     className={`flex-1 px-4 py-3 rounded-r-xl border ${errors.contactNumber ? "border-red-500" : "border-gray-300"} border-l-0 bg-white focus:ring-2 focus:ring-blue-500 focus:border-blue-500 transition text-base`}
-                    placeholder="9876543210"
-                    disabled={submitting}
-                  />
+                    placeholder="9876543210" disabled={submitting} />
                 </div>
                 {errors.contactNumber && <p className="mt-1 text-sm text-red-600">{errors.contactNumber}</p>}
               </div>
 
-              {/* Date */}
               <div>
                 <label className="flex items-center gap-2 text-sm font-semibold text-gray-700 mb-2"><Calendar size={18} /> Travel/Check-in Date</label>
-                <input type="date" value={form.date} onChange={(e) => setForm({ ...form, date: e.target.value })} className={`w-full px-4 py-3 rounded-xl border ${errors.date ? "border-red-500" : "border-gray-300"} bg-white focus:ring-2 focus:ring-blue-500 focus:border-blue-500 transition text-base`} disabled={submitting} />
+                <input type="date" value={form.date} onChange={(e) => setForm({ ...form, date: e.target.value })}
+                  className={`w-full px-4 py-3 rounded-xl border ${errors.date ? "border-red-500" : "border-gray-300"} bg-white focus:ring-2 focus:ring-blue-500 focus:border-blue-500 transition text-base`} disabled={submitting} />
                 {errors.date && <p className="mt-1 text-sm text-red-600">{errors.date}</p>}
               </div>
 
               {/* Base Pay */}
               <div>
                 <label className="flex items-center gap-2 text-sm font-semibold text-gray-700 mb-2"><IndianRupee size={18} /> Base Pay</label>
-                <input type="number" min="0" step="0.01" value={form.basePay} onChange={(e) => setForm({ ...form, basePay: e.target.value })} className={`w-full px-4 py-3 rounded-xl border ${errors.basePay ? "border-red-500" : "border-gray-300"} bg-white focus:ring-2 focus:ring-blue-500 focus:border-blue-500 transition text-base`} placeholder="250.00" disabled={submitting} />
+                <input type="number" min="0" step="0.01" value={form.basePay} onChange={(e) => setForm({ ...form, basePay: e.target.value })}
+                  className={`w-full px-4 py-3 rounded-xl border ${errors.basePay ? "border-red-500" : "border-gray-300"} bg-white focus:ring-2 focus:ring-blue-500 focus:border-blue-500 transition text-base`} placeholder="250.00" disabled={submitting} />
                 {errors.basePay && <p className="mt-1 text-sm text-red-600">{errors.basePay}</p>}
-                {form.platform && form.platform !== "Direct" && platformBalance !== null && (
+                {form.platform && !isDirect && platformBalance !== null && (
                   <p className="mt-1 text-xs text-gray-500">
-                    Available in {form.platform}: ₹{platformBalance.toFixed(2)}
+                    Available in {form.platform}: <span className="font-medium">₹{formatBalance(platformBalance)}</span>
                     {platformBalance < baseAmount && baseAmount > 0 && (
                       <span className="text-red-600 ml-2">Insufficient</span>
                     )}
@@ -403,23 +398,31 @@ export default function EditBooking() {
                 )}
               </div>
 
-              {/* Commission & Markup */}
-              <div>
-                <label className="flex items-center gap-2 text-sm font-semibold text-gray-700 mb-2"><IndianRupee size={18} /> Commission Amount</label>
-                <input type="number" min="0" step="0.01" value={form.commissionAmount} onChange={(e) => setForm({ ...form, commissionAmount: e.target.value })} className={`w-full px-4 py-3 rounded-xl border ${errors.commissionAmount ? "border-red-500" : "border-gray-300"} bg-white focus:ring-2 focus:ring-blue-500 focus:border-blue-500 transition text-base`} placeholder="50.00" disabled={submitting} />
-                {errors.commissionAmount && <p className="mt-1 text-sm text-red-600">{errors.commissionAmount}</p>}
-              </div>
+              {/* Commission */}
+              {!isDirect && (
+                <div>
+                  <label className="flex items-center gap-2 text-sm font-semibold text-gray-700 mb-2"><IndianRupee size={18} /> Commission Amount</label>
+                  <input type="number" min="0" step="0.01" value={form.commissionAmount}
+                    onChange={(e) => setForm({ ...form, commissionAmount: e.target.value })}
+                    className={`w-full px-4 py-3 rounded-xl border ${errors.commissionAmount ? "border-red-500" : "border-gray-300"} bg-white focus:ring-2 focus:ring-blue-500 focus:border-blue-500 transition text-base`} placeholder="50.00" disabled={submitting} />
+                  {errors.commissionAmount && <p className="mt-1 text-sm text-red-600">{errors.commissionAmount}</p>}
+                </div>
+              )}
 
+              {/* Markup */}
               <div>
                 <label className="flex items-center gap-2 text-sm font-semibold text-gray-700 mb-2"><TrendingUp size={18} /> Markup Amount</label>
-                <input type="number" min="0" step="0.01" value={form.markupAmount} onChange={(e) => setForm({ ...form, markupAmount: e.target.value })} className={`w-full px-4 py-3 rounded-xl border ${errors.markupAmount ? "border-red-500" : "border-gray-300"} bg-white focus:ring-2 focus:ring-blue-500 focus:border-blue-500 transition text-base`} placeholder="25.00" disabled={submitting} />
+                <input type="number" min="0" step="0.01" value={form.markupAmount}
+                  onChange={(e) => setForm({ ...form, markupAmount: e.target.value })}
+                  className={`w-full px-4 py-3 rounded-xl border ${errors.markupAmount ? "border-red-500" : "border-gray-300"} bg-white focus:ring-2 focus:ring-blue-500 focus:border-blue-500 transition text-base`} placeholder="25.00" disabled={submitting} />
                 {errors.markupAmount && <p className="mt-1 text-sm text-red-600">{errors.markupAmount}</p>}
               </div>
 
               {/* Status */}
               <div>
                 <label className="flex items-center gap-2 text-sm font-semibold text-gray-700 mb-2"><Clock size={18} /> Status</label>
-                <select value={form.status} onChange={(e) => setForm({ ...form, status: e.target.value })} className="w-full px-4 py-3 rounded-xl border border-gray-300 bg-white focus:ring-2 focus:ring-blue-500 focus:border-blue-500 transition text-base" disabled={submitting}>
+                <select value={form.status} onChange={(e) => setForm({ ...form, status: e.target.value })}
+                  className="w-full px-4 py-3 rounded-xl border border-gray-300 bg-white focus:ring-2 focus:ring-blue-500 focus:border-blue-500 transition text-base" disabled={submitting}>
                   <option value={STATUS.PENDING}>Pending</option>
                   <option value={STATUS.CONFIRMED}>Confirmed</option>
                   <option value={STATUS.CANCELLED}>Cancelled</option>
@@ -432,48 +435,36 @@ export default function EditBooking() {
                   <CheckCircle size={20} /> Applied Summary
                 </h3>
                 <div className="grid grid-cols-1 sm:grid-cols-2 gap-3 text-sm">
-                  <div className="flex justify-between">
-                    <span className="text-gray-600">Base Pay:</span>
-                    <span className="font-medium">₹{basePayDisplay}</span>
-                  </div>
-                  <div className="flex justify-between">
-                    <span className="text-gray-600">Commission:</span>
-                    <span className="font-medium">₹{commissionDisplay}</span>
-                  </div>
-                  <div className="flex justify-between">
-                    <span className="text-gray-600">Markup:</span>
-                    <span className="font-medium">₹{markupDisplay}</span>
-                  </div>
-                  <div className="flex justify-between">
-                    <span className="text-gray-600">Net Profit:</span>
-                    <span className="font-medium">₹{netProfit}</span>
-                  </div>
+                  <div className="flex justify-between"><span className="text-gray-600">Base Pay:</span> <span className="font-medium">₹{formatBalance(form.basePay)}</span></div>
+                  {!isDirect && <div className="flex justify-between"><span className="text-gray-600">Commission:</span> <span className="font-medium">₹{formatBalance(form.commissionAmount)}</span></div>}
+                  <div className="flex justify-between"><span className="text-gray-600">Markup:</span> <span className="font-medium">₹{formatBalance(form.markupAmount)}</span></div>
+                  <div className="flex justify-between"><span className="text-gray-600">Net Profit:</span> <span className="font-medium">₹{netProfit}</span></div>
                   <div className="flex justify-between sm:col-span-2 border-t border-indigo-200 pt-2">
                     <span className="font-semibold text-indigo-700">Total Revenue:</span>
                     <span className="font-bold text-indigo-800 text-lg">₹{totalRevenue}</span>
                   </div>
-                  <div className="flex justify-between sm:col-span-2">
-                    <span className="text-gray-600">Platform:</span>
-                    <span className="font-medium capitalize">{platforms.find(p => p.value === form.platform)?.label || "Direct"}</span>
-                  </div>
-                  <div className="flex justify-between sm:col-span-2">
-                    <span className="text-gray-600">Contact:</span>
-                    <span className="font-medium">{fullContact || "-"}</span>
-                  </div>
+                  <div className="flex justify-between sm:col-span-2"><span className="text-gray-600">Platform:</span> <span className="font-medium capitalize">{platforms.find(p => p.value === form.platform)?.label || "Direct"}</span></div>
+                  <div className="flex justify-between sm:col-span-2"><span className="text-gray-600">Contact:</span> <span className="font-medium">{fullContact || "-"}</span></div>
                   <div className="flex justify-between sm:col-span-2">
                     <span className="text-gray-600">Status:</span>
                     <span className={`font-medium ${form.status === STATUS.CONFIRMED ? "text-emerald-700" : form.status === STATUS.CANCELLED ? "text-red-700" : "text-amber-700"}`}>
                       {form.status.charAt(0).toUpperCase() + form.status.slice(1).toLowerCase()}
                     </span>
                   </div>
+                  {isDirect && <div className="col-span-2 text-xs text-green-600 font-medium">Office Fund +₹{netProfit}</div>}
+                  {!isDirect && <div className="col-span-2 text-xs text-green-600 font-medium">Office Fund +₹{netProfit} (after platform)</div>}
                 </div>
               </div>
 
               {/* Buttons */}
               <div className="flex gap-4 pt-6">
-                <button type="button" onClick={() => navigate("/bookings")} className="flex-1 px-6 py-3 bg-gray-100 text-gray-700 rounded-xl hover:bg-gray-200 transition font-medium" disabled={submitting}>Cancel</button>
-                <button type="submit" disabled={submitting} className={`flex-1 px-6 py-3 bg-gradient-to-r from-blue-600 to-indigo-600 text-white rounded-xl hover:from-blue-700 hover:to-indigo-700 transition font-medium shadow-lg flex items-center justify-center gap-2 ${submitting ? "opacity-75 cursor-not-allowed" : ""}`}>
-                  {submitting ? <>Saving...</> : <><Save size={20} /> Save Changes</>}
+                <button type="button" onClick={() => navigate("/bookings")}
+                  className="flex-1 px-6 py-3 bg-gray-100 text-gray-700 rounded-xl hover:bg-gray-200 transition font-medium"
+                  disabled={submitting}>Cancel</button>
+
+                <button type="submit" disabled={submitting}
+                  className={`flex-1 px-6 py-3 bg-gradient-to-r from-blue-600 to-indigo-600 text-white rounded-xl hover:from-blue-700 hover:to-indigo-700 transition font-medium shadow-lg flex items-center justify-center gap-2 ${submitting ? "opacity-75 cursor-not-allowed" : ""}`}>
+                  {submitting ? "Saving..." : <><Save size={20} /> Save Changes</>}
                 </button>
               </div>
             </form>

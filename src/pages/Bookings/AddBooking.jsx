@@ -1,5 +1,5 @@
 // src/pages/AddBooking.jsx
-import { useState, useMemo } from "react";
+import { useState, useMemo, useEffect, useRef } from "react";
 import { useNavigate } from "react-router-dom";
 import DashboardLayout from "../../components/DashboardLayout";
 import { useBooking, CATEGORY, STATUS } from "../../context/BookingContext";
@@ -27,16 +27,16 @@ const platforms = [
 ];
 
 const countryCodes = [
-  { code: "+91", country: "India", flag: "India" },
-  { code: "+1", country: "USA", flag: "USA" },
-  { code: "+44", country: "UK", flag: "UK" },
-  { code: "+971", country: "UAE", flag: "UAE" },
-  { code: "+966", country: "Saudi Arabia", flag: "Saudi Arabia" },
-  { code: "+974", country: "Qatar", flag: "Qatar" },
-  { code: "+965", country: "Kuwait", flag: "Kuwait" },
-  { code: "+968", country: "Oman", flag: "Oman" },
-  { code: "+973", country: "Bahrain", flag: "Bahrain" },
-  { code: "+61", country: "Australia", flag: "Australia" },
+  { code: "+91", country: "India", flag: "IN" },
+  { code: "+1", country: "USA", flag: "US" },
+  { code: "+44", country: "UK", flag: "GB" },
+  { code: "+971", country: "UAE", flag: "AE" },
+  { code: "+966", country: "Saudi Arabia", flag: "SA" },
+  { code: "+974", country: "Qatar", flag: "QA" },
+  { code: "+965", country: "Kuwait", flag: "KW" },
+  { code: "+968", country: "Oman", flag: "OM" },
+  { code: "+973", country: "Bahrain", flag: "BH" },
+  { code: "+61", country: "Australia", flag: "AU" },
 ];
 
 export default function AddBooking() {
@@ -64,6 +64,8 @@ export default function AddBooking() {
   const [success, setSuccess] = useState(false);
   const [walletError, setWalletError] = useState("");
 
+  const dropdownRef = useRef(null);
+
   const fullContact = `${form.selectedCountryCode} ${form.contactNumber}`.trim();
   const isDirect = form.platform === PLATFORM.DIRECT;
   const isConfirmed = form.status === STATUS.CONFIRMED;
@@ -73,7 +75,7 @@ export default function AddBooking() {
   const platformBalance = useMemo(() => {
     if (!form.platform || isDirect) return null;
     const p = platforms.find(p => p.value === form.platform);
-    return p?.walletKey ? formatBalance(getWallet(p.walletKey)) : null;
+    return p?.walletKey ? getWallet(p.walletKey) : null;
   }, [form.platform, getWallet, isDirect]);
 
   const totalRevenue = useMemo(() => {
@@ -87,13 +89,20 @@ export default function AddBooking() {
     const base = parseFloat(form.basePay) || 0;
     const comm = parseFloat(form.commissionAmount) || 0;
     const mark = parseFloat(form.markupAmount) || 0;
-
-    return isDirect
-      ? formatBalance(base + mark)  // Direct: base + markup
-      : formatBalance(comm + mark); // Indirect: commission + markup
+    return isDirect ? formatBalance(base + mark) : formatBalance(comm + mark);
   }, [form.basePay, form.commissionAmount, form.markupAmount, isDirect]);
 
   const baseAmount = parseFloat(form.basePay) || 0;
+
+  useEffect(() => {
+    const handleClickOutside = (e) => {
+      if (dropdownRef.current && !dropdownRef.current.contains(e.target)) {
+        setShowCountryDropdown(false);
+      }
+    };
+    document.addEventListener("mousedown", handleClickOutside);
+    return () => document.removeEventListener("mousedown", handleClickOutside);
+  }, []);
 
   const validate = () => {
     const e = {};
@@ -110,11 +119,9 @@ export default function AddBooking() {
     if (form.commissionAmount && Number(form.commissionAmount) < 0) e.commissionAmount = "Commission cannot be negative";
     if (form.markupAmount && Number(form.markupAmount) < 0) e.markupAmount = "Markup cannot be negative";
 
-    // Wallet validation for confirmed + non-direct
-    if (isConfirmed && !isDirect && form.platform) {
-      const p = platforms.find(p => p.value === form.platform);
-      if (p?.walletKey && getWallet(p.walletKey) < baseAmount) {
-        e.basePay = `Insufficient balance in ${form.platform}. Available: ₹${platformBalance}`;
+    if (isConfirmed && !isDirect && form.platform && platformBalance !== null) {
+      if (platformBalance < baseAmount) {
+        e.basePay = `Insufficient balance in ${form.platform}. Available: ₹${formatBalance(platformBalance)}`;
       }
     }
 
@@ -131,11 +138,12 @@ export default function AddBooking() {
 
     try {
       const booking = {
+        id: Date.now(),
         customerName: form.customerName.trim(),
         email: form.email.trim(),
         contactNumber: fullContact,
         date: form.date,
-        basePay: parseFloat(form.basePay) || 0,
+        basePay: baseAmount,
         commissionAmount: parseFloat(form.commissionAmount) || 0,
         markupAmount: parseFloat(form.markupAmount) || 0,
         totalRevenue: parseFloat(totalRevenue),
@@ -145,7 +153,7 @@ export default function AddBooking() {
         category: form.category,
       };
 
-      // Apply wallet deduction only if confirmed
+      // Apply wallet for ALL confirmed bookings
       if (isConfirmed) {
         applyBookingWallet(booking, form.customerName.trim() || "User");
       }
@@ -155,7 +163,7 @@ export default function AddBooking() {
       setSuccess(true);
       setTimeout(() => navigate("/bookings"), 1200);
     } catch (err) {
-      setWalletError(err.message || "Failed to add booking.");
+      setWalletError(err.message || "Failed to add booking. Check wallet balance.");
     } finally {
       setSubmitting(false);
     }
@@ -253,31 +261,29 @@ export default function AddBooking() {
                 <label className="flex items-center gap-2 text-sm font-semibold text-gray-700 mb-2">
                   <Phone size={18} /> Contact Number
                 </label>
-                <div className="flex gap-0">
-                  <div className="relative">
-                    <button type="button" onClick={() => setShowCountryDropdown(!showCountryDropdown)}
-                      className="flex items-center gap-1.5 px-3 py-3 bg-gray-50 border border-gray-300 rounded-l-xl hover:bg-gray-100 transition whitespace-nowrap text-sm font-medium text-gray-700"
-                      disabled={submitting}>
-                      <span className="text-lg">{countryCodes.find(c => c.code === form.selectedCountryCode)?.flag}</span>
-                      <span>{form.selectedCountryCode}</span>
-                      <ChevronDown size={16} className={`transition-transform ${showCountryDropdown ? "rotate-180" : ""}`} />
-                    </button>
+                <div className="flex gap-0" ref={dropdownRef}>
+                  <button type="button" onClick={() => setShowCountryDropdown(!showCountryDropdown)}
+                    className="flex items-center gap-1.5 px-3 py-3 bg-gray-50 border border-gray-300 rounded-l-xl hover:bg-gray-100 transition whitespace-nowrap text-sm font-medium text-gray-700"
+                    disabled={submitting}>
+                    <span className="text-lg">{countryCodes.find(c => c.code === form.selectedCountryCode)?.flag}</span>
+                    <span>{form.selectedCountryCode}</span>
+                    <ChevronDown size={16} className={`transition-transform ${showCountryDropdown ? "rotate-180" : ""}`} />
+                  </button>
 
-                    {showCountryDropdown && (
-                      <motion.div initial={{ opacity: 0, y: -8 }} animate={{ opacity: 1, y: 0 }}
-                        className="absolute top-full left-0 mt-1 w-48 bg-white rounded-xl shadow-xl border border-gray-200 overflow-hidden z-10">
-                        {countryCodes.map((c) => (
-                          <button key={c.code} type="button"
-                            onClick={() => { setForm({ ...form, selectedCountryCode: c.code }); setShowCountryDropdown(false); }}
-                            className={`w-full text-left px-3 py-2.5 flex items-center gap-2 hover:bg-gray-50 transition text-sm ${form.selectedCountryCode === c.code ? "bg-blue-50 text-blue-700 font-medium" : "text-gray-700"}`}>
-                            <span className="text-lg">{c.flag}</span>
-                            <span>{c.country}</span>
-                            <span className="ml-auto text-gray-500">{c.code}</span>
-                          </button>
-                        ))}
-                      </motion.div>
-                    )}
-                  </div>
+                  {showCountryDropdown && (
+                    <motion.div initial={{ opacity: 0, y: -8 }} animate={{ opacity: 1, y: 0 }}
+                      className="absolute top-full left-0 mt-1 w-48 bg-white rounded-xl shadow-xl border border-gray-200 overflow-hidden z-10">
+                      {countryCodes.map((c) => (
+                        <button key={c.code} type="button"
+                          onClick={() => { setForm({ ...form, selectedCountryCode: c.code }); setShowCountryDropdown(false); }}
+                          className={`w-full text-left px-3 py-2.5 flex items-center gap-2 hover:bg-gray-50 transition text-sm ${form.selectedCountryCode === c.code ? "bg-blue-50 text-blue-700 font-medium" : "text-gray-700"}`}>
+                          <span className="text-lg">{c.flag}</span>
+                          <span>{c.country}</span>
+                          <span className="ml-auto text-gray-500">{c.code}</span>
+                        </button>
+                      ))}
+                    </motion.div>
+                  )}
 
                   <input type="text" value={form.contactNumber}
                     onChange={(e) => { const val = e.target.value.replace(/[^\d]/g, ""); setForm({ ...form, contactNumber: val }); }}
@@ -300,17 +306,17 @@ export default function AddBooking() {
                 <input type="number" min="0" step="0.01" value={form.basePay} onChange={(e) => setForm({ ...form, basePay: e.target.value })}
                   className={`w-full px-4 py-3 rounded-xl border ${errors.basePay ? "border-red-500" : "border-gray-300"} bg-white focus:ring-2 focus:ring-blue-500 focus:border-blue-500 transition text-base`} placeholder="250.00" disabled={submitting} />
                 {errors.basePay && <p className="mt-1 text-sm text-red-600">{errors.basePay}</p>}
-                {form.platform && !isDirect && platformBalance !== null && isConfirmed && (
+                {form.platform && !isDirect && platformBalance !== null && (
                   <p className="mt-1 text-xs text-gray-500">
-                    Available in {form.platform}: <span className="font-medium">₹{platformBalance}</span>
-                    {getWallet(platforms.find(p => p.value === form.platform)?.walletKey) < baseAmount && baseAmount > 0 && (
+                    Available in {form.platform}: <span className="font-medium">₹{formatBalance(platformBalance)}</span>
+                    {platformBalance < baseAmount && baseAmount > 0 && (
                       <span className="text-red-600 ml-2">Insufficient</span>
                     )}
                   </p>
                 )}
               </div>
 
-              {/* COMMISSION */}
+              {/* COMMISSION (only for non-direct) */}
               {!isDirect && (
                 <div>
                   <label className="flex items-center gap-2 text-sm font-semibold text-gray-700 mb-2"><IndianRupee size={18} /> Commission Amount</label>
@@ -363,8 +369,8 @@ export default function AddBooking() {
                       {form.status.charAt(0).toUpperCase() + form.status.slice(1).toLowerCase()}
                     </span>
                   </div>
-                  {isDirect && <div className="col-span-2 text-xs text-gray-500 italic">* Direct: Net Profit = Base + Markup</div>}
-                  {!isDirect && <div className="col-span-2 text-xs text-gray-500 italic">* AlHind/Akbar: Net Profit = Commission + Markup</div>}
+                  {isDirect && <div className="col-span-2 text-xs text-green-600 font-medium">Office Fund +₹{netProfit}</div>}
+                  {!isDirect && <div className="col-span-2 text-xs text-green-600 font-medium">Office Fund +₹{netProfit} (after platform)</div>}
                 </div>
               </div>
 

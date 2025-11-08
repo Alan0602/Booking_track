@@ -20,7 +20,12 @@ const AllBookings = () => {
     getStats,
   } = useBooking();
   const { expenses = [] } = useExpense();
-  const { refundBookingWallet, applyBookingWallet, refundBookingOnDelete } = useWallet();
+  const {
+    applyBookingWallet,
+    refundBookingWallet,
+    refundBookingOnDelete,
+    reverseBookingWallet,
+  } = useWallet();
 
   const [searchTerm, setSearchTerm] = useState("");
   const [filterStatus, setFilterStatus] = useState("all");
@@ -98,30 +103,32 @@ const AllBookings = () => {
     { value: STATUS.CANCELLED, label: "Cancelled", color: "text-red-600 dark:text-red-400" },
   ];
 
-  // Handle status toggle with wallet logic
+  // === HANDLE STATUS CHANGE WITH WALLET LOGIC ===
   const handleStatusChange = (id, currentStatus) => {
     const booking = bookings.find(b => b.id === id);
     if (!booking) return;
 
     const nextStatus = currentStatus === STATUS.CONFIRMED ? STATUS.PENDING : STATUS.CONFIRMED;
 
+    // If going from CONFIRMED → PENDING
+    if (currentStatus === STATUS.CONFIRMED && nextStatus === STATUS.PENDING) {
+      refundBookingWallet(booking, "User"); // Refund platform + office
+    }
+
+    // If going from PENDING → CONFIRMED
+    if (currentStatus === STATUS.PENDING && nextStatus === STATUS.CONFIRMED) {
+      applyBookingWallet(booking, "User"); // Apply platform + office
+    }
+
     updateBookingStatus(id, nextStatus);
-
-    if (currentStatus === STATUS.CONFIRMED && nextStatus !== STATUS.CONFIRMED) {
-      refundBookingWallet(booking, "User");
-    }
-
-    if (currentStatus !== STATUS.CONFIRMED && nextStatus === STATUS.CONFIRMED) {
-      applyBookingWallet(booking, "User");
-    }
   };
 
-  // Handle delete with refund
+  // === HANDLE DELETE WITH FULL REFUND ===
   const handleRemove = (id) => {
     const booking = bookings.find(b => b.id === id);
     if (!booking) return;
 
-    if (window.confirm("Delete this booking? Wallet will be refunded.")) {
+    if (window.confirm("Delete this booking? All wallet entries will be refunded.")) {
       refundBookingOnDelete(booking, "User");
       removeBooking(id);
     }
@@ -131,6 +138,7 @@ const AllBookings = () => {
     <DashboardLayout>
       <div className={`min-h-screen transition-colors duration-300 ${darkMode ? "bg-gray-900 text-white" : "bg-gradient-to-br from-slate-50 via-white to-indigo-50"}`}>
         <div className="space-y-6 p-4 sm:p-6 lg:p-8 max-w-7xl mx-auto">
+
           {/* HEADER */}
           <div className={`relative overflow-hidden rounded-2xl p-8 shadow-2xl text-white ${darkMode ? "bg-gradient-to-r from-gray-800 via-gray-700 to-gray-900" : "bg-gradient-to-r from-blue-600 via-indigo-600 to-purple-700"}`}>
             <div className="absolute inset-0 opacity-10">
@@ -155,7 +163,7 @@ const AllBookings = () => {
                     <span className="text-sm text-white/90">Total</span>
                   </div>
                   <div className="text-sm text-white/90">
-                    ₹{stats.revenue.toLocaleString()} revenue | Net: ₹{stats.netProfit.toLocaleString()}
+                    Revenue: ₹{stats.revenue.toLocaleString()} • Net: ₹{stats.netProfit.toLocaleString()}
                   </div>
                 </div>
               </div>
