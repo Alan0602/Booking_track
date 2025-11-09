@@ -246,7 +246,7 @@ const SignIn = () => {
           </p> */}
         </div>
 
-        <p className="text-center text-xs text-gray-500 mt-8">© 2025 YourApp. All rights reserved.</p>
+        <p className="text-center text-xs text-gray-500 mt-8">© 2025 Compass Tours And Travels. All rights reserved.</p>
       </div>
     </div>
   );
