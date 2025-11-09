@@ -1,5 +1,5 @@
 // src/context/NotificationContext.jsx
-import { createContext, useContext, useState, useEffect, useMemo } from "react";
+import { createContext, useContext, useState, useEffect, useMemo, useCallback } from "react";
 
 const NotificationContext = createContext();
 
@@ -14,25 +14,18 @@ const NOTIF_KEY = "crm-compass-notifications-v2";
 export const NotificationProvider = ({ children }) => {
   const [notifications, setNotifications] = useState([]);
 
-  // Load
   useEffect(() => {
     try {
       const raw = localStorage.getItem(NOTIF_KEY);
       if (raw) {
         const parsed = JSON.parse(raw);
-        if (Array.isArray(parsed)) {
-          setNotifications(parsed);
-        } else {
-          setNotifications([]);
-        }
+        if (Array.isArray(parsed)) setNotifications(parsed);
       }
     } catch (e) {
       console.error("Failed to load notifications", e);
-      setNotifications([]);
     }
   }, []);
 
-  // Save
   useEffect(() => {
     try {
       localStorage.setItem(NOTIF_KEY, JSON.stringify(notifications));
@@ -41,17 +34,29 @@ export const NotificationProvider = ({ children }) => {
     }
   }, [notifications]);
 
-  const addNotification = (message, type = "info") => {
-    const id = Date.now();
-    const n = { id, message, type, timestamp: new Date(), read: false };
-    setNotifications(p => [n, ...p]);
-  };
+  const addNotification = useCallback((message, type = "info") => {
+    const key = `${type}:${message}`;
+    const now = Date.now();
 
-  const markAsRead = (id) => {
-    setNotifications(p => p.map(n => n.id === id ? { ...n, read: true } : n));
-  };
+    setNotifications(prev => {
+      const exists = prev.some(n => 
+        n.type === type && 
+        n.message === message && 
+        now - n.timestamp < 3000
+      );
+      if (exists) return prev;
 
-  const clearAll = () => setNotifications([]);
+      const id = now + Math.random();
+      const n = { id, message, type, timestamp: now, read: false };
+      return [n, ...prev];
+    });
+  }, []);
+
+  const markAsRead = useCallback((id) => {
+    setNotifications(prev => prev.map(n => n.id === id ? { ...n, read: true } : n));
+  }, []);
+
+  const clearAll = useCallback(() => setNotifications([]), []);
 
   const unreadCount = useMemo(
     () => notifications.filter(n => !n.read).length,
@@ -61,7 +66,6 @@ export const NotificationProvider = ({ children }) => {
   return (
     <NotificationContext.Provider value={{
       notifications,
-      setNotifications,
       addNotification,
       markAsRead,
       clearAll,

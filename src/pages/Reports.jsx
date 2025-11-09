@@ -21,7 +21,7 @@ import { useExpense } from "../context/ExpenseContext";
 import DashboardLayout from "../components/DashboardLayout";
 
 import {
-  Download, Calendar, TrendingUp, TrendingDown, Users, DollarSign,
+  Download, Calendar, TrendingUp, TrendingDown, Users,
   FileText, Filter, BarChart3, PieChart, Activity, Target,
   ArrowUpRight, ArrowDownRight, IndianRupee, ShoppingCart,
   FileDown, Gauge, Sparkles, Sun, Moon,
@@ -218,7 +218,7 @@ const Reports = () => {
 
     return [
       { label: "Avg Net Profit/Booking", value: `₹${avgNetProfitPerBooking}`, icon: TrendingUp },
-      { label: "Avg Commission/Booking", value: `₹${avgCommissionPerBooking}`, icon: DollarSign },
+      { label: "Avg Commission/Booking", value: `₹${avgCommissionPerBooking}`, icon: IndianRupee },
       { label: "Profit Margin", value: `${profitMargin}%`, icon: Target },
     ];
   }, [confirmedInRange, bookingProfit, bookingCount, profitMargin]);
@@ -262,7 +262,7 @@ const Reports = () => {
                     <Users size={16} /> {bookingCount} confirmed bookings
                   </div>
                   <div className="flex items-center gap-2 bg-white/20 backdrop-blur-sm px-4 py-2 rounded-full">
-                    <DollarSign size={16} /> ₹{totalRevenue.toLocaleString()}
+                    <IndianRupee size={16} /> ₹{totalRevenue.toLocaleString()}
                   </div>
                   <div className="flex items-center gap-2 bg-white/20 backdrop-blur-sm px-4 py-2 rounded-full">
                     <div className="w-2 h-2 bg-green-400 rounded-full animate-pulse"></div>
@@ -361,7 +361,7 @@ const Reports = () => {
             {/* KPI CARDS */}
             <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-5 gap-5">
               {[
-                { label: "Revenue", value: totalRevenue, growth: revenueGrowth, icon: DollarSign, color: "indigo" },
+                { label: "Revenue", value: totalRevenue, growth: revenueGrowth, icon: IndianRupee, color: "indigo" },
                 { label: "Expenses", value: totalExpense, icon: ShoppingCart, color: "rose" },
                 { label: "Net Profit", value: netProfit, margin: profitMargin, icon: Target, color: netProfit >= 0 ? "emerald" : "red" },
                 { label: "Confirmed", value: bookingCount, icon: Users, color: "blue" },

@@ -14,6 +14,7 @@ import {
   CheckCircle,
   Wallet as WalletIcon,
   ChevronDown,
+  IndianRupeeIcon,
 } from "lucide-react";
 import Logo from "../assets/Logo.png";
 import { useAuth } from "../context/AuthContext";
@@ -30,13 +31,13 @@ const Sidebar = () => {
   const links = [
     { name: "Dashboard", path: "/", icon: LayoutDashboard },
     { name: "Bookings", path: "/bookings", icon: Book },
-    { name: "Customer Details", path: "/customers", icon: User },
+    { name: "Customer Profile", path: "/customers", icon: User },
     { name: "Funds", path: "/funds", icon: Wallet },
     { name: "Tasks", path: "/tasks", icon: CheckCircle },
 
     // ✅ PARENT SECTION
     {
-      name: "Add Capital",
+      name: "Capital",
       icon: PlusCircle,
       children: [
         { name: "Manage Partners", path: "/add-revenue" },
@@ -44,7 +45,7 @@ const Sidebar = () => {
       ],
     },
 
-    { name: "Add Log Expense", path: "/log-expense", icon: Receipt },
+    { name: "Log Expense", path: "/log-expense", icon: IndianRupeeIcon },
     { name: "Reports", path: "/reports", icon: BarChart3 },
     { name: "Settings", path: "/settings", icon: Settings },
   ];

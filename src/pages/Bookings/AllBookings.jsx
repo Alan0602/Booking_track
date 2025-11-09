@@ -1,7 +1,7 @@
 // src/pages/AllBookings.jsx
 import { Link, useNavigate } from "react-router-dom";
 import {
-  Plus, Package, Calendar, Users, DollarSign, TrendingUp,
+  Plus, Package, Calendar, Users, IndianRupee, TrendingUp,
   Phone, Globe, Sun, Moon, Filter, Search, ChevronDown,
 } from "lucide-react";
 import DashboardLayout from "../../components/DashboardLayout";
@@ -186,7 +186,7 @@ const AllBookings = () => {
               { label: "Total", value: stats.total, icon: Package, gradient: darkMode ? "from-blue-600 to-blue-700" : "from-blue-500 to-blue-600" },
               { label: "Confirmed", value: stats.confirmed, icon: Calendar, gradient: darkMode ? "from-emerald-600 to-emerald-700" : "from-green-500 to-emerald-600" },
               { label: "Pending", value: stats.pending, icon: Users, gradient: darkMode ? "from-orange-600 to-orange-700" : "from-amber-500 to-orange-600" },
-              { label: "Revenue", value: `₹${stats.revenue.toLocaleString()}`, icon: DollarSign, gradient: darkMode ? "from-purple-600 to-indigo-700" : "from-purple-500 to-indigo-600" },
+              { label: "Revenue", value: `₹${stats.revenue.toLocaleString()}`, icon:IndianRupee, gradient: darkMode ? "from-purple-600 to-indigo-700" : "from-purple-500 to-indigo-600" },
               { label: "Net Profit", value: `₹${stats.netProfit.toLocaleString()}`, icon: TrendingUp, gradient: stats.netProfit >= 0 ? (darkMode ? "from-emerald-600 to-emerald-700" : "from-green-500 to-emerald-600") : (darkMode ? "from-red-600 to-red-700" : "from-red-500 to-rose-600") },
             ].map((stat, idx) => (
               <div key={idx} className={`bg-gradient-to-br ${stat.gradient} p-6 rounded-xl text-white shadow-lg hover:shadow-xl transform hover:-translate-y-1 transition-all duration-300`}>

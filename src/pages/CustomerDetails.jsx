@@ -16,7 +16,6 @@ import {
   Copy,
   CheckCircle,
   Clock,
-  DollarSign,
   TrendingUp,
   ChevronDown,
   Plane,
@@ -201,7 +200,7 @@ export default function AllCustomers() {
             {[
               { label: "Total Customers", value: uniqueCustomers.length, icon: Users },
               { label: "Total Bookings", value: bookings.length, icon: Package },
-              { label: "Total Revenue", value: `₹${uniqueCustomers.reduce((s, c) => s + c.stats.revenue, 0).toLocaleString()}`, icon: DollarSign },
+              { label: "Total Revenue", value: `₹${uniqueCustomers.reduce((s, c) => s + c.stats.revenue, 0).toLocaleString()}`, icon: IndianRupee },
               { label: "Avg. Revenue", value: `₹${uniqueCustomers.length ? Math.round(uniqueCustomers.reduce((s, c) => s + c.stats.revenue, 0) / uniqueCustomers.length).toLocaleString() : 0}`, icon: TrendingUp },
             ].map((stat, i) => (
               <motion.div

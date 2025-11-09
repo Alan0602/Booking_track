@@ -3,12 +3,13 @@ import { useState, useRef, useCallback, useEffect, useMemo, memo } from "react";
 import { motion, AnimatePresence } from "framer-motion";
 import {
   Plus, Calendar, User, CheckCircle, Clock, Sparkles, Edit3, Save, X,
-  AlertCircle, Search, Trash2, History, ChevronRight, Filter
+  AlertCircle, Search, Trash2, History, ChevronRight
 } from "lucide-react";
 
 import { useNotifications } from "../context/NotificationContext";
 import DashboardLayout from "../components/DashboardLayout";
 import { useTaskContext } from "../context/TaskContext";
+import { useAuth } from "../context/AuthContext";
 
 const TEAM = [
   { id: "u1", name: "AntonyJoseph", avatar: "A", color: "from-rose-400 to-pink-500" },
@@ -32,29 +33,31 @@ const Task = () => {
   const [showHistory, setShowHistory] = useState(false);
 
   const editRefs = useRef({});
+  const notifiedRef = useRef(new Set());
 
   const { addNotification } = useNotifications();
-  const {
-    tasks, history,
-    addTask, toggleTask, updateTask, deleteTask, clearCompleted
-  } = useTaskContext();
+  const { tasks, history, addTask, toggleTask, updateTask, deleteTask, clearCompleted } = useTaskContext();
+  const { user } = useAuth();
 
-  // Due reminders
-  const notifiedRef = useRef(new Set());
+  // DUE-DATE ALERTS ONLY
   const checkDueDates = useCallback(() => {
     const now = new Date();
-    const notified = notifiedRef.current;
+    const today = new Date(now.getFullYear(), now.getMonth(), now.getDate());
+    const tomorrow = new Date(today);
+    tomorrow.setDate(tomorrow.getDate() + 1);
+
     tasks.forEach(task => {
-      if (task.completed || !task.dueDate || notified.has(task.id)) return;
+      if (task.completed || !task.dueDate || notifiedRef.current.has(task.id)) return;
+
       const due = new Date(task.dueDate);
-      const diff = due.getTime() - now.getTime();
-      const days = Math.floor(diff / (1000 * 60 * 60 * 24));
-      if (days === 0 && diff > 0) {
+      const dueDateOnly = new Date(due.getFullYear(), due.getMonth(), due.getDate());
+
+      if (dueDateOnly.getTime() === today.getTime()) {
         addNotification(`Due today: "${task.title}"`, "warning");
-        notified.add(task.id);
-      } else if (days === 1) {
+        notifiedRef.current.add(task.id);
+      } else if (dueDateOnly.getTime() === tomorrow.getTime()) {
         addNotification(`Due tomorrow: "${task.title}"`, "info");
-        notified.add(task.id);
+        notifiedRef.current.add(task.id);
       }
     });
   }, [tasks, addNotification]);
@@ -65,28 +68,37 @@ const Task = () => {
     return () => clearInterval(id);
   }, [checkDueDates]);
 
+  // ADD TASK
   const handleAdd = (e) => {
     e.preventDefault();
     if (!title.trim()) return;
+
     const member = TEAM.find(m => m.id === assigneeId) || null;
+
     const newTask = {
       id: Date.now(),
       title: title.trim(),
-      dueDate, priority,
+      dueDate,
+      priority,
       assigneeId: member?.id || "",
       assigneeName: member?.name || "",
       assigneeAvatar: member?.avatar || "",
       assigneeColor: member?.color || "",
+      createdBy: user?.id || "unknown",
+      createdByName: user?.name || "Admin",
+      createdByAvatar: user?.avatar || "C",
+      createdByColor: user?.color || "from-cyan-400 to-blue-600",
       completed: false,
       createdAt: new Date().toISOString(),
     };
-    addTask(newTask);
-    addNotification(`Task created: "${title}"`, "success");
+
+    addTask(newTask); // NOTIFICATION IN CONTEXT
     setTitle(""); setDueDate(""); setAssigneeId(""); setPriority("medium");
   };
 
   const startEdit = (id) => { editRefs.current[id] = {}; setEditingId(id); };
   const cancelEdit = () => { if (editingId) delete editRefs.current[editingId]; setEditingId(null); };
+
   const saveEdit = (id) => {
     const refs = editRefs.current[id];
     if (!refs) return;
@@ -101,16 +113,15 @@ const Task = () => {
       assigneeColor: member?.color || "",
       priority: refs.priority?.value || oldTask.priority,
     };
-    updateTask(id, updates);
-    addNotification(`Task updated`, "info");
+    updateTask(id, updates); // NOTIFICATION IN CONTEXT
     delete editRefs.current[id];
     setEditingId(null);
   };
 
+  // DELETE — USES CONTEXT (NO DUPLICATES)
   const handleDelete = (id) => {
     if (window.confirm("Delete this task permanently?")) {
-      deleteTask(id);
-      addNotification("Task deleted", "info");
+      deleteTask(id); // NOTIFICATION IN CONTEXT
     }
   };
 
@@ -145,13 +156,14 @@ const Task = () => {
         transition={{ delay: index * 0.05 }}
         className="group"
       >
-        <div className={`
-          relative rounded-3xl p-6 transition-all duration-300
-          ${task.completed
-            ? "bg-gradient-to-br from-gray-50 to-gray-100 border border-gray-200/50"
-            : "bg-white/90 backdrop-blur-2xl border border-white/40 shadow-xl hover:shadow-2xl hover:-translate-y-1"}
-        `}>
-          {/* Actions */}
+        <div
+          className={`relative rounded-3xl p-6 transition-all duration-300 ${
+            task.completed
+              ? "bg-gradient-to-br from-gray-50 to-gray-100 border border-gray-200/50"
+              : "bg-white/90 backdrop-blur-2xl border border-white/40 shadow-xl hover:shadow-2xl hover:-translate-y-1"
+          }`}
+        >
+          {/* Edit/Delete Buttons */}
           <div className="absolute top-4 right-4 opacity-0 group-hover:opacity-100 transition-opacity flex gap-1 z-10">
             {isEditing ? (
               <div className="flex gap-1 bg-white/80 backdrop-blur-xl rounded-2xl p-1 shadow-lg">
@@ -164,21 +176,32 @@ const Task = () => {
               </div>
             ) : (
               <>
-                <button onClick={() => startEdit(task.id)} className="p-2.5 bg-gradient-to-br from-indigo-500 to-purple-600 text-white rounded-xl shadow-lg">
+                <button
+                  onClick={() => startEdit(task.id)}
+                  className="p-2.5 bg-gradient-to-br from-indigo-500 to-purple-600 text-white rounded-xl shadow-lg"
+                >
                   <Edit3 size={16} />
                 </button>
-                <button onClick={() => handleDelete(task.id)} className="p-2.5 bg-red-500 text-white rounded-xl shadow-lg">
+                <button
+                  onClick={() => handleDelete(task.id)}
+                  className="p-2.5 bg-red-500 text-white rounded-xl shadow-lg"
+                >
                   <Trash2 size={16} />
                 </button>
               </>
             )}
           </div>
 
+          {/* Checkbox */}
           <motion.button
-            whileHover={{ scale: 1.1 }} whileTap={{ scale: 0.9 }}
+            whileHover={{ scale: 1.1 }}
+            whileTap={{ scale: 0.9 }}
             onClick={() => toggleTask(task.id)}
-            className={`absolute top-6 left-6 w-7 h-7 rounded-full flex items-center justify-center
-              ${task.completed ? "bg-gradient-to-br from-emerald-500 to-teal-600 text-white shadow-md" : "border-2 border-gray-300 hover:border-emerald-500"}`}
+            className={`absolute top-6 left-6 w-7 h-7 rounded-full flex items-center justify-center ${
+              task.completed
+                ? "bg-gradient-to-br from-emerald-500 to-teal-600 text-white shadow-md"
+                : "border-2 border-gray-300 hover:border-emerald-500"
+            }`}
           >
             {task.completed && <CheckCircle size={16} />}
           </motion.button>
@@ -186,36 +209,70 @@ const Task = () => {
           <div className="pl-14 pr-12">
             {isEditing ? (
               <div className="grid gap-2 text-sm">
-                <input ref={el => (editRefs.current[task.id] = { ...editRefs.current[task.id], title: el })} defaultValue={task.title}
-                  className="px-3 py-2 bg-gradient-to-r from-gray-50 to-gray-100 rounded-xl focus:outline-none focus:ring-2 focus:ring-indigo-300 font-medium" />
+                <input
+                  ref={el => (editRefs.current[task.id] = { ...editRefs.current[task.id], title: el })}
+                  defaultValue={task.title}
+                  className="px-3 py-2 bg-gradient-to-r from-gray-50 to-gray-100 rounded-xl focus:outline-none focus:ring-2 focus:ring-indigo-300 font-medium"
+                />
                 <div className="grid grid-cols-2 gap-2">
-                  <input ref={el => (editRefs.current[task.id] = { ...editRefs.current[task.id], due: el })} type="date" defaultValue={task.dueDate}
-                    className="px-3 py-2 bg-gradient-to-r from-gray-50 to-gray-100 rounded-xl focus:outline-none focus:ring-2 focus:ring-indigo-300" />
-                  <select ref={el => (editRefs.current[task.id] = { ...editRefs.current[task.id], assignee: el })} defaultValue={task.assigneeId}
-                    className="px-3 py-2 bg-gradient-to-r from-gray-50 to-gray-100 rounded-xl focus:outline-none focus:ring-2 focus:ring-indigo-300">
+                  <input
+                    ref={el => (editRefs.current[task.id] = { ...editRefs.current[task.id], due: el })}
+                    type="date"
+                    defaultValue={task.dueDate}
+                    className="px-3 py-2 bg-gradient-to-r from-gray-50 to-gray-100 rounded-xl focus:outline-none focus:ring-2 focus:ring-indigo-300"
+                  />
+                  <select
+                    ref={el => (editRefs.current[task.id] = { ...editRefs.current[task.id], assignee: el })}
+                    defaultValue={task.assigneeId}
+                    className="px-3 py-2 bg-gradient-to-r from-gray-50 to-gray-100 rounded-xl focus:outline-none focus:ring-2 focus:ring-indigo-300"
+                  >
                     <option value="">Unassigned</option>
-                    {TEAM.map(m => <option key={m.id} value={m.id}>{m.name}</option>)}
+                    {TEAM.map(m => (
+                      <option key={m.id} value={m.id}>{m.name}</option>
+                    ))}
                   </select>
-                  <select ref={el => (editRefs.current[task.id] = { ...editRefs.current[task.id], priority: el })} defaultValue={task.priority}
-                    className="col-span-2 px-3 py-2 bg-gradient-to-r from-gray-50 to-gray-100 rounded-xl focus:outline-none focus:ring-2 focus:ring-indigo-300">
-                    {Object.entries(PRIORITY_CONFIG).map(([k, v]) => <option key={k} value={k}>{v.label}</option>)}
+                  <select
+                    ref={el => (editRefs.current[task.id] = { ...editRefs.current[task.id], priority: el })}
+                    defaultValue={task.priority}
+                    className="col-span-2 px-3 py-2 bg-gradient-to-r from-gray-50 to-gray-100 rounded-xl focus:outline-none focus:ring-2 focus:ring-indigo-300"
+                  >
+                    {Object.entries(PRIORITY_CONFIG).map(([k, v]) => (
+                      <option key={k} value={k}>{v.label}</option>
+                    ))}
                   </select>
                 </div>
               </div>
             ) : (
               <>
+                <div className="flex items-center gap-1.5 mb-2 text-xs font-medium text-gray-600">
+                  <User size={14} className="text-cyan-500" />
+                  <span>Assigned by:</span>
+                  <span className="flex items-center gap-1 px-2 py-0.5 bg-gradient-to-r from-cyan-50 to-blue-50 rounded-full text-blue-700">
+                    <div
+                      className={`w-5 h-5 rounded-full bg-gradient-to-br ${task.createdByColor} flex items-center justify-center text-white text-xs font-bold`}
+                    >
+                      {task.createdByAvatar}
+                    </div>
+                    {task.createdByName}
+                  </span>
+                </div>
+
                 <h3 className={`font-bold text-lg mb-2 ${task.completed ? "line-through text-gray-500" : "text-gray-900"}`}>
                   {task.title}
                 </h3>
+
                 <div className="flex flex-wrap gap-2 text-xs">
                   {task.dueDate && (
                     <span className="flex items-center gap-1 px-2.5 py-1 bg-gradient-to-r from-indigo-50 to-purple-50 rounded-full text-indigo-700 font-medium">
-                      <Calendar size={12} /> {new Date(task.dueDate).toLocaleDateString("en-IN", { day: "numeric", month: "short" })}
+                      <Calendar size={12} />
+                      {new Date(task.dueDate).toLocaleDateString("en-IN", { day: "numeric", month: "short" })}
                     </span>
                   )}
                   {task.assigneeName && (
                     <span className="flex items-center gap-1 px-2.5 py-1 bg-gradient-to-r from-pink-50 to-rose-50 rounded-full text-rose-700 font-medium">
-                      <div className={`w-5 h-5 rounded-full bg-gradient-to-br ${task.assigneeColor} flex items-center justify-center text-white text-xs font-bold`}>
+                      <div
+                        className={`w-5 h-5 rounded-full bg-gradient-to-br ${task.assigneeColor} flex items-center justify-center text-white text-xs font-bold`}
+                      >
                         {task.assigneeAvatar}
                       </div>
                       {task.assigneeName}
@@ -242,7 +299,6 @@ const Task = () => {
     <DashboardLayout>
       <div className="min-h-screen bg-gradient-to-br from-slate-50 via-indigo-50 to-purple-50 p-4 md:p-8">
         <div className="max-w-7xl mx-auto">
-
           {/* Header */}
           <motion.div initial={{ opacity: 0, y: -20 }} animate={{ opacity: 1, y: 0 }} className="mb-8">
             <div className="flex items-center justify-between">
@@ -258,7 +314,8 @@ const Task = () => {
                 </div>
               </div>
               <motion.button
-                whileHover={{ scale: 1.05 }} whileTap={{ scale: 0.95 }}
+                whileHover={{ scale: 1.05 }}
+                whileTap={{ scale: 0.95 }}
                 onClick={() => setShowHistory(!showHistory)}
                 className="flex items-center gap-2 px-4 py-2 bg-white/80 backdrop-blur-xl rounded-2xl shadow-lg text-gray-700 font-medium"
               >
@@ -274,14 +331,16 @@ const Task = () => {
             <div className="relative">
               <Search className="absolute left-4 top-1/2 -translate-y-1/2 w-5 h-5 text-gray-500" />
               <input
-                type="text" value={searchQuery} onChange={e => setSearchQuery(e.target.value)}
+                type="text"
+                value={searchQuery}
+                onChange={e => setSearchQuery(e.target.value)}
                 placeholder="Search tasks..."
                 className="w-full pl-12 pr-6 py-4 bg-white/80 backdrop-blur-xl rounded-3xl focus:outline-none focus:ring-4 focus:ring-indigo-200 transition-all text-lg font-medium"
               />
             </div>
           </motion.div>
 
-          {/* Dual Columns */}
+          {/* Task Lists */}
           <div className="grid grid-cols-1 lg:grid-cols-2 gap-8">
             {/* Pending */}
             <div>
@@ -291,20 +350,19 @@ const Task = () => {
                     <Clock className="w-6 h-6 text-white" />
                   </div>
                   <h2 className="text-2xl font-bold text-gray-800">Pending</h2>
-                  <span className="px-3 py-1 bg-amber-100 text-amber-700 rounded-full text-sm font-bold">
-                    {pending.length}
-                  </span>
+                  <span className="px-3 py-1 bg-amber-100 text-amber-700 rounded-full text-sm font-bold">{pending.length}</span>
                 </div>
               </div>
               <AnimatePresence>
                 {pending.length === 0 ? (
-                  <motion.p initial={{ opacity: 0 }} animate={{ opacity: 1 }}
-                    className="text-center py-16 text-gray-500 bg-white/50 backdrop-blur-xl rounded-3xl">
+                  <motion.p initial={{ opacity: 0 }} animate={{ opacity: 1 }} className="text-center py-16 text-gray-500 bg-white/50 backdrop-blur-xl rounded-3xl">
                     All clear!
                   </motion.p>
                 ) : (
                   <div className="space-y-4">
-                    {pending.map((t, i) => <TaskCard key={t.id} task={t} index={i} />)}
+                    {pending.map((t, i) => (
+                      <TaskCard key={t.id} task={t} index={i} />
+                    ))}
                   </div>
                 )}
               </AnimatePresence>
@@ -318,26 +376,27 @@ const Task = () => {
                     <CheckCircle className="w-6 h-6 text-white" />
                   </div>
                   <h2 className="text-2xl font-bold text-gray-800">Completed</h2>
-                  <span className="px-3 py-1 bg-emerald-100 text-emerald-700 rounded-full text-sm font-bold">
-                    {done.length}
-                  </span>
+                  <span className="px-3 py-1 bg-emerald-100 text-emerald-700 rounded-full text-sm font-bold">{done.length}</span>
                 </div>
                 {done.length > 0 && (
-                  <button onClick={clearCompleted}
-                    className="flex items-center gap-1 px-3 py-1.5 bg-red-500 text-white rounded-xl text-sm font-medium hover:bg-red-600 transition">
+                  <button
+                    onClick={clearCompleted}
+                    className="flex items-center gap-1 px-3 py-1.5 bg-red-500 text-white rounded-xl text-sm font-medium hover:bg-red-600 transition"
+                  >
                     <Trash2 size={14} /> Clear All
                   </button>
                 )}
               </div>
               <AnimatePresence>
                 {done.length === 0 ? (
-                  <motion.p initial={{ opacity: 0 }} animate={{ opacity: 1 }}
-                    className="text-center py-16 text-gray-500 bg-white/50 backdrop-blur-xl rounded-3xl">
+                  <motion.p initial={{ opacity: 0 }} animate={{ opacity: 1 }} className="text-center py-16 text-gray-500 bg-white/50 backdrop-blur-xl rounded-3xl">
                     No victories yet
                   </motion.p>
                 ) : (
                   <div className="space-y-4">
-                    {done.map((t, i) => <TaskCard key={t.id} task={t} index={i} />)}
+                    {done.map((t, i) => (
+                      <TaskCard key={t.id} task={t} index={i} />
+                    ))}
                   </div>
                 )}
               </AnimatePresence>
@@ -355,8 +414,7 @@ const Task = () => {
               >
                 <div className="p-6 border-b border-gray-200">
                   <h3 className="text-xl font-bold flex items-center gap-2">
-                    <History className="w-6 h-6 text-indigo-600" />
-                    Task History
+                    <History className="w-6 h-6 text-indigo-600" /> Task History
                   </h3>
                 </div>
                 <div className="max-h-96 overflow-y-auto">
@@ -377,7 +435,7 @@ const Task = () => {
                                 {entry.action === "cleared" && "Cleared"} task
                                 <span className="font-bold text-indigo-600"> "{entry.taskTitle}"</span>
                               </span>
-                              {entry.details && <span className="text-gray-600"> → {entry.details}</span>}
+                              {entry.details && <span className="text-gray-600"> ({entry.details})</span>}
                             </div>
                             <span className="text-xs text-gray-500">
                               {new Date(entry.timestamp).toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' })}
@@ -392,36 +450,58 @@ const Task = () => {
             )}
           </AnimatePresence>
 
-          {/* Sticky Add Form */}
+          {/* Add Task Form */}
           <motion.div
-            initial={{ y: 100 }} animate={{ y: 0 }}
+            initial={{ y: 100 }}
+            animate={{ y: 0 }}
             className="fixed bottom-0 left-0 right-0 p-4 bg-gradient-to-t from-white via-white to-transparent lg:relative lg:mt-12"
           >
             <div className="max-w-4xl mx-auto">
               <form onSubmit={handleAdd} className="bg-white/90 backdrop-blur-2xl rounded-3xl shadow-2xl p-6 border border-white/50">
                 <div className="grid grid-cols-1 md:grid-cols-4 gap-4">
-                  <input type="text" value={title} onChange={e => setTitle(e.target.value)} placeholder="New task..." required
-                    className="col-span-1 md:col-span-2 px-5 py-3 bg-gradient-to-r from-gray-50 to-gray-100 rounded-2xl focus:outline-none focus:ring-4 focus:ring-indigo-200 font-medium" />
-                  <input type="date" value={dueDate} onChange={e => setDueDate(e.target.value)}
-                    className="px-5 py-3 bg-gradient-to-r from-gray-50 to-gray-100 rounded-2xl focus:outline-none focus:ring-4 focus:ring-indigo-200" />
-                  <select value={assigneeId} onChange={e => setAssigneeId(e.target.value)}
-                    className="px-5 py-3 bg-gradient-to-r from-gray-50 to-gray-100 rounded-2xl focus:outline-none focus:ring-4 focus:ring-indigo-200 appearance-none">
+                  <input
+                    type="text"
+                    value={title}
+                    onChange={e => setTitle(e.target.value)}
+                    placeholder="New task..."
+                    required
+                    className="col-span-1 md:col-span-2 px-5 py-3 bg-gradient-to-r from-gray-50 to-gray-100 rounded-2xl focus:outline-none focus:ring-4 focus:ring-indigo-200 font-medium"
+                  />
+                  <input
+                    type="date"
+                    value={dueDate}
+                    onChange={e => setDueDate(e.target.value)}
+                    className="px-5 py-3 bg-gradient-to-r from-gray-50 to-gray-100 rounded-2xl focus:outline-none focus:ring-4 focus:ring-indigo-200"
+                  />
+                  <select
+                    value={assigneeId}
+                    onChange={e => setAssigneeId(e.target.value)}
+                    className="px-5 py-3 bg-gradient-to-r from-gray-50 to-gray-100 rounded-2xl focus:outline-none focus:ring-4 focus:ring-indigo-200 appearance-none"
+                  >
                     <option value="">Unassigned</option>
-                    {TEAM.map(m => <option key={m.id} value={m.id}>{m.name}</option>)}
+                    {TEAM.map(m => (
+                      <option key={m.id} value={m.id}>{m.name}</option>
+                    ))}
                   </select>
-                  <select value={priority} onChange={e => setPriority(e.target.value)}
-                    className="px-5 py-3 bg-gradient-to-r from-gray-50 to-gray-100 rounded-2xl focus:outline-none focus:ring-4 focus:ring-indigo-200">
-                    {Object.entries(PRIORITY_CONFIG).map(([k, v]) => <option key={k} value={k}>{v.label}</option>)}
+                  <select
+                    value={priority}
+                    onChange={e => setPriority(e.target.value)}
+                    className="px-5 py-3 bg-gradient-to-r from-gray-50 to-gray-100 rounded-2xl focus:outline-none focus:ring-4 focus:ring-indigo-200"
+                  >
+                    {Object.entries(PRIORITY_CONFIG).map(([k, v]) => (
+                      <option key={k} value={k}>{v.label}</option>
+                    ))}
                   </select>
-                  <button type="submit"
-                    className="col-span-1 md:col-span-4 mt-2 py-3 bg-gradient-to-r from-indigo-500 via-purple-600 to-pink-600 text-white font-bold rounded-2xl shadow-xl hover:shadow-2xl transition-all flex items-center justify-center gap-2">
+                  <button
+                    type="submit"
+                    className="col-span-1 md:col-span-4 mt-2 py-3 bg-gradient-to-r from-indigo-500 via-purple-600 to-pink-600 text-white font-bold rounded-2xl shadow-xl hover:shadow-2xl transition-all flex items-center justify-center gap-2"
+                  >
                     <Plus className="w-5 h-5" /> Launch Task
                   </button>
                 </div>
               </form>
             </div>
           </motion.div>
-
         </div>
       </div>
     </DashboardLayout>
