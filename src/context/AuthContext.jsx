@@ -4,9 +4,9 @@ import { useNavigate } from "react-router-dom";
 const AuthContext = createContext();
 
 const DEMO_ADMINS = [
-  { email: "Adminakshay@compass.com", password: "admin123", name: "Compass Admin1" },
-  { email: "Adminhari@compass.com", password: "admin123", name: "Compass Admin2" },
-   { email: "Adminantony@compass.com", password: "admin123", name: "Compass Admin3" },
+  { email: "adminakshay@compass.com", password: "admin123", name: "Compass Admin1" },
+  { email: "adminhari@compass.com", password: "admin123", name: "Compass Admin2" },
+   { email: "adminantony@compass.com", password: "admin123", name: "Compass Admin3" },
 ];
 
 export const AuthProvider = ({ children }) => {
