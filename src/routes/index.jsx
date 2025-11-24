@@ -1,5 +1,5 @@
 // src/routes/AppRoutes.jsx
-import { Routes, Route } from "react-router-dom";
+import { Routes, Route, Navigate } from "react-router-dom";
 import Dashboard from "../pages/Dashboard";
 import AllBookings from "../pages/Bookings/AllBookings";
 import TrackBooking from "../pages/Bookings/TrackBooking";
@@ -27,53 +27,60 @@ import { ExpenseProvider } from "../context/ExpenseContext";
 import { NotificationProvider } from "../context/NotificationContext";
 import { TaskProvider } from "../context/TaskContext";
 import { WalletProvider } from "../context/WalletContext";
+import { useAuth } from "../context/AuthContext";
+
+const PrivateRoute = ({ children }) => {
+  const { user, loading } = useAuth();
+  if (loading) return null; // or a loader component
+  return user ? children : <Navigate to="/signin" replace />;
+};
 const AppRoutes = () => {
   return (
-    <BookingProvider>
-      <FundsProvider>
-        <ExpenseProvider>
-          <NotificationProvider>
-            <TaskProvider>
-              <WalletProvider>
+    <WalletProvider>
+      <BookingProvider>
+        <FundsProvider>
+          <ExpenseProvider>
+            <NotificationProvider>
+              <TaskProvider>
           <Routes>
             {/* Auth */}
             <Route path="/signin" element={<SignIn />} />
             <Route path="/register" element={<Register />} />
 
             {/* Dashboard */}
-            <Route path="/" element={<Dashboard />} />
+            <Route path="/" element={<PrivateRoute><Dashboard /></PrivateRoute>} />
 
             {/* Bookings */}
-            <Route path="/bookings" element={<AllBookings />} />
-            <Route path="/bookings/track" element={<TrackBooking />} />
-            <Route path="/bookings/add" element={<AddBooking />} />
-            <Route path="/bookings/edit/:id" element={<EditBooking />} />
-            <Route path="/bookings/history/:id" element={<EditHistory />} />  // ← ADD THIS
-            <Route path="/customers" element={<CustomerDetails />} /> {/* Fixed */}
-            <Route path="/bookings/view/:id" element={<ViewBooking />} />
+            <Route path="/bookings" element={<PrivateRoute><AllBookings /></PrivateRoute>} />
+            <Route path="/bookings/track" element={<PrivateRoute><TrackBooking /></PrivateRoute>} />
+            <Route path="/bookings/add" element={<PrivateRoute><AddBooking /></PrivateRoute>} />
+            <Route path="/bookings/edit/:id" element={<PrivateRoute><EditBooking /></PrivateRoute>} />
+            <Route path="/bookings/history/:id" element={<PrivateRoute><EditHistory /></PrivateRoute>} />  // ← ADD THIS
+            <Route path="/customers" element={<PrivateRoute><CustomerDetails /></PrivateRoute>} /> {/* Fixed */}
+            <Route path="/bookings/view/:id" element={<PrivateRoute><ViewBooking /></PrivateRoute>} />
 
             {/* Funds + Expenses */}
-            <Route path="/funds" element={<FundsDashboard />} />
-            <Route path="/add-wallet-amount" element={<AddWalletAmount />} />
-            <Route path="/add-revenue" element={<AddRevenue />} />
-            <Route path="/log-expense" element={<LogExpense />} />
-            <Route path="/view/:id" element={<ViewExpense />} />
+            <Route path="/funds" element={<PrivateRoute><FundsDashboard /></PrivateRoute>} />
+            <Route path="/add-wallet-amount" element={<PrivateRoute><AddWalletAmount /></PrivateRoute>} />
+            <Route path="/add-revenue" element={<PrivateRoute><AddRevenue /></PrivateRoute>} />
+            <Route path="/log-expense" element={<PrivateRoute><LogExpense /></PrivateRoute>} />
+            <Route path="/view/:id" element={<PrivateRoute><ViewExpense /></PrivateRoute>} />
 
-            <Route path="/tasks" element={<Task />} /> {/* <-- Added */}
-            <Route path="/notifications" element={<Notification />} /> {/* <-- Added */}
+            <Route path="/tasks" element={<PrivateRoute><Task /></PrivateRoute>} /> {/* <-- Added */}
+            <Route path="/notifications" element={<PrivateRoute><Notification /></PrivateRoute>} /> {/* <-- Added */}
             {/* Reports & Settings */}
-            <Route path="/reports" element={<Reports />} />
-            <Route path="/settings" element={<Settings />} />
+            <Route path="/reports" element={<PrivateRoute><Reports /></PrivateRoute>} />
+            <Route path="/settings" element={<PrivateRoute><Settings /></PrivateRoute>} />
 
             {/* 404 */}
             <Route path="*" element={<NotFound />} />
           </Routes>
-              </WalletProvider>
-            </TaskProvider>
-          </NotificationProvider>
-        </ExpenseProvider>
-      </FundsProvider>
-    </BookingProvider>
+              </TaskProvider>
+            </NotificationProvider>
+          </ExpenseProvider>
+        </FundsProvider>
+      </BookingProvider>
+    </WalletProvider>
   );
 };
 
