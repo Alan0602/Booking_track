@@ -26,7 +26,6 @@ export const TaskProvider = ({ children }) => {
     const { data, error } = await supabase
       .from("tasks")
       .select("*")
-      .eq("user_id", user.id)
       .order("created_at", { ascending: false });
     if (error) {
       console.error("[Task] loadTasks error", error);
@@ -57,7 +56,6 @@ export const TaskProvider = ({ children }) => {
     const { data, error } = await supabase
       .from("task_history")
       .select("*")
-      .eq("user_id", user.id)
       .order("timestamp", { ascending: false })
       .limit(100);
     if (error) {
@@ -174,8 +172,7 @@ export const TaskProvider = ({ children }) => {
       const { error } = await supabase
         .from("tasks")
         .update({ completed: nextCompleted })
-        .eq("id", id)
-        .eq("user_id", user.id);
+        .eq("id", id);
       if (error) {
         console.error("[Task] toggleTask error", error);
         completingRef.current.delete(id);
@@ -210,8 +207,7 @@ export const TaskProvider = ({ children }) => {
       const { error } = await supabase
         .from("tasks")
         .update(payload)
-        .eq("id", id)
-        .eq("user_id", user.id);
+        .eq("id", id);
       if (error) {
         console.error("[Task] updateTask error", error);
         addNotification("Failed to update task", "error");
@@ -230,8 +226,7 @@ export const TaskProvider = ({ children }) => {
       const { error } = await supabase
         .from("tasks")
         .delete()
-        .eq("id", id)
-        .eq("user_id", user.id);
+        .eq("id", id);
       if (error) {
         console.error("[Task] deleteTask error", error);
         addNotification("Failed to delete task", "error");
@@ -251,7 +246,6 @@ export const TaskProvider = ({ children }) => {
       const { error } = await supabase
         .from("tasks")
         .delete()
-        .eq("user_id", user.id)
         .eq("completed", true);
       if (error) {
         console.error("[Task] clearCompleted error", error);

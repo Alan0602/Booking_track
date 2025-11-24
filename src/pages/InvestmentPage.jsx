@@ -73,7 +73,7 @@ export default function Investment() {
     const { count, error } = await supabase
       .from("partner_investments")
       .select("id", { count: "exact", head: true })
-      .eq("user_id", user.id);
+      ;
     if (error) {
       console.warn("Failed to load activity count:", error);
       return;

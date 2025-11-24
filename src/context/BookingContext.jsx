@@ -69,7 +69,7 @@ export const BookingProvider = ({ children }) => {
     createdAt: row.created_at,
   });
 
-  // Load bookings for current user from Supabase view (includes net_profit)
+  // Load all bookings from Supabase view (includes net_profit)
   useEffect(() => {
     const load = async () => {
       if (!user) {
@@ -81,7 +81,6 @@ export const BookingProvider = ({ children }) => {
       const { data, error } = await supabase
         .from("bookings_with_profit")
         .select("*")
-        .eq("user_id", user.id)
         .order("created_at", { ascending: false });
       if (error) {
         console.error("Failed to fetch bookings:", error);

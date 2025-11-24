@@ -102,7 +102,7 @@ export const ExpenseProvider = ({ children }) => {
     attachment: row.attachment_url || null,
   });
 
-  // Fetch expenses for current user
+  // Fetch all expenses (admin visibility across users)
   const refreshExpenses = async () => {
     if (!user) {
       setExpenses([]);
@@ -113,7 +113,6 @@ export const ExpenseProvider = ({ children }) => {
       const { data, error } = await supabase
         .from("expenses")
         .select("*")
-        .eq("user_id", user.id)
         .order("expense_date", { ascending: false });
       if (error) throw error;
       const mapped = (data || []).map(fromRow);
