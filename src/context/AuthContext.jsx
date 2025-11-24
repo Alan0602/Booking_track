@@ -1,51 +1,53 @@
 import { createContext, useContext, useState, useEffect } from "react";
 import { useNavigate } from "react-router-dom";
+import supabase from "../utils/supabase";
 
 const AuthContext = createContext();
 
-const DEMO_ADMINS = [
-  { email: "adminakshay@compass.com", password: "admin123", name: "Compass Admin1" },
-  { email: "adminhari@compass.com", password: "admin123", name: "Compass Admin2" },
-   { email: "adminantony@compass.com", password: "admin123", name: "Compass Admin3" },
-];
+// Supabase-backed authentication context
 
 export const AuthProvider = ({ children }) => {
   const [user, setUser] = useState(null);
-  const [loading, setLoading] = useState(true);   // ← NEW
+  const [loading, setLoading] = useState(true);
   const navigate = useNavigate();
 
-  // ---- 1. Restore user synchronously on first render ----
+  // Restore session and subscribe to changes
   useEffect(() => {
-    const saved = localStorage.getItem("authUser");
-    if (saved) {
-      try {
-        setUser(JSON.parse(saved));
-      } catch (_) {
-        // corrupted → ignore
-      }
-    }
-    setLoading(false);
+    const init = async () => {
+      const { data: sessionData } = await supabase.auth.getSession();
+      setUser(sessionData?.session?.user ?? null);
+      setLoading(false);
+    };
+
+    init();
+
+    const { data: sub } = supabase.auth.onAuthStateChange((_event, session) => {
+      setUser(session?.user ?? null);
+    });
+
+    return () => {
+      sub.subscription?.unsubscribe?.();
+    };
   }, []);
 
-  const login = (email, password) => {
-    const found = DEMO_ADMINS.find(
-      (a) => a.email === email && a.password === password
-    );
-    if (!found) {
-      alert("Invalid credentials. Please try again.");
-      return false;
+  const login = async (email, password) => {
+    const { data, error } = await supabase.auth.signInWithPassword({
+      email,
+      password,
+    });
+    if (error) {
+      throw new Error(error.message || "Invalid credentials");
     }
-
-    setUser(found);
-    localStorage.setItem("authUser", JSON.stringify(found));
+    setUser(data.user);
     navigate("/");
     return true;
   };
 
   const logout = () => {
-    setUser(null);
-    localStorage.removeItem("authUser");
-    navigate("/signin");
+    supabase.auth.signOut().finally(() => {
+      setUser(null);
+      navigate("/signin");
+    });
   };
 
   return (
