@@ -12,6 +12,7 @@
   "dependencies": {
     "@headlessui/react": "^2.2.4",
     "@heroicons/react": "^2.2.0",
+    "@supabase/supabase-js": "^2.81.1",
     "@tailwindcss/vite": "^4.1.11",
     "chart.js": "^4.5.0",
     "date-fns": "^4.1.0",
