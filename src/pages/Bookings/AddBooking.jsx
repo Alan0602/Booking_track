@@ -153,11 +153,7 @@ export default function AddBooking() {
         category: form.category,
       };
 
-      // Apply wallet for ALL confirmed bookings
-      if (isConfirmed) {
-        applyBookingWallet(booking, form.customerName.trim() || "User");
-      }
-
+      // Atomic booking + wallet handled in backend RPC via addBooking
       await addBooking(booking);
 
       setSuccess(true);

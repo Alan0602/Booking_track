@@ -1,6 +1,9 @@
 // src/context/BookingContext.jsx
 import { createContext, useContext, useState, useEffect } from "react";
 import { toast } from "react-hot-toast";
+import supabase from "../utils/supabase";
+import { useAuth } from "./AuthContext";
+import { useWallet } from "./WalletContext";
 
 export const CATEGORY = {
   FLIGHT: "flight",
@@ -19,30 +22,84 @@ export const STATUS = {
 const BookingContext = createContext(undefined);
 
 export const BookingProvider = ({ children }) => {
-  const [bookings, setBookings] = useState(() => {
-    try {
-      const saved = localStorage.getItem("bookings");
-      if (!saved) return [];
-      const parsed = JSON.parse(saved);
-      return Array.isArray(parsed) ? parsed : [];
-    } catch (e) {
-      console.error("Failed to load bookings", e);
-      toast.error("Failed to load saved bookings");
-      return [];
-    }
+  const { user } = useAuth();
+  const { refreshWallets, refreshTransactions } = useWallet();
+  const [bookings, setBookings] = useState([]);
+  const [isLoading, setIsLoading] = useState(true);
+
+  // Helpers: map camelCase ↔ snake_case
+  const toRow = (raw) => {
+    const base = Number(raw.basePay || 0);
+    const comm = Number(raw.commissionAmount || 0);
+    const mark = Number(raw.markupAmount || 0);
+    const totalRevenue = parseFloat((base + comm + mark).toFixed(2));
+    return {
+      id: raw.id,
+      customer_name: raw.customerName?.trim(),
+      email: raw.email?.trim()?.toLowerCase(),
+      contact_number: raw.contactNumber?.trim(),
+      booking_date: raw.date ? new Date(raw.date).toISOString() : new Date().toISOString(),
+      category: raw.category,
+      platform: raw.platform || "Direct",
+      status: raw.status || STATUS.PENDING,
+      base_pay: base,
+      commission_amount: comm,
+      markup_amount: mark,
+      total_revenue: totalRevenue,
+      user_id: user?.id || null,
+    };
+  };
+
+  const fromRow = (row) => ({
+    id: row.id,
+    customerName: row.customer_name,
+    email: row.email,
+    contactNumber: row.contact_number,
+    date: row.booking_date,
+    category: row.category,
+    platform: row.platform,
+    status: row.status,
+    basePay: Number(row.base_pay || 0),
+    commissionAmount: Number(row.commission_amount || 0),
+    markupAmount: Number(row.markup_amount || 0),
+    totalRevenue: Number(row.total_revenue || 0),
+    netProfit: Number(row.net_profit ?? (row.platform === "Direct"
+      ? Number(row.base_pay || 0) + Number(row.markup_amount || 0)
+      : Number(row.commission_amount || 0) + Number(row.markup_amount || 0))),
+    createdAt: row.created_at,
   });
 
-  // Persist to localStorage
+  // Load bookings for current user from Supabase view (includes net_profit)
   useEffect(() => {
-    try {
-      localStorage.setItem("bookings", JSON.stringify(bookings));
-    } catch (e) {
-      console.error("Failed to save bookings", e);
-    }
-  }, [bookings]);
+    const load = async () => {
+      if (!user) {
+        setBookings([]);
+        setIsLoading(false);
+        return;
+      }
+      setIsLoading(true);
+      const { data, error } = await supabase
+        .from("bookings_with_profit")
+        .select("*")
+        .eq("user_id", user.id)
+        .order("created_at", { ascending: false });
+      if (error) {
+        console.error("Failed to fetch bookings:", error);
+        toast.error("Failed to fetch bookings");
+        setBookings([]);
+      } else {
+        setBookings(Array.isArray(data) ? data.map(fromRow) : []);
+      }
+      setIsLoading(false);
+    };
+    load();
+    // re-run when user changes
+  }, [user]);
 
-  // === ADD BOOKING ===
-  const addBooking = (rawBooking) => {
+  // === ADD BOOKING (RPC: atomic booking + wallet movements) ===
+  const addBooking = async (rawBooking) => {
+    if (!user) throw new Error("User is not logged in");
+
     const {
       customerName,
       email,
@@ -62,69 +119,116 @@ export const BookingProvider = ({ children }) => {
       throw new Error("Valid email is required");
     if (!contactNumber?.trim()) throw new Error("Contact number is required");
     if (!date) throw new Error("Date is required");
+    if (!Object.values(CATEGORY).includes(category)) throw new Error("Invalid category");
+    if (!Object.values(STATUS).includes(status)) throw new Error("Invalid status");
 
-    if (basePay < 0) throw new Error("Base pay cannot be negative");
-    if (commissionAmount < 0) throw new Error("Commission cannot be negative");
-    if (markupAmount < 0) throw new Error("Markup cannot be negative");
+    // Normalize platform to match wallet names used in SQL (e.g., 'AlHind')
+    const normalizePlatform = (p) => {
+      if (!p) return "Direct";
+      const t = String(p);
+      if (t === "Alhind") return "AlHind"; // fix casing mismatch
+      return t;
+    };
+    const platformNormalized = normalizePlatform(platform);
 
-    if (!Object.values(CATEGORY).includes(category))
-      throw new Error("Invalid category");
-    if (!Object.values(STATUS).includes(status))
-      throw new Error("Invalid status");
-
-    // Platform required for non-direct
-    if (platform !== "Direct" && !platform)
-      throw new Error("Platform is required for non-direct bookings");
-
-    const base = Number(basePay);
-    const comm = Number(commissionAmount);
-    const mark = Number(markupAmount);
-
-    const totalRevenue = parseFloat((base + comm + mark).toFixed(2));
-
-    // NET PROFIT LOGIC
-    const netProfit = platform === "Direct"
-      ? parseFloat((base + mark).toFixed(2))           // Direct: base + markup
-      : parseFloat((comm + mark).toFixed(2));          // Indirect: commission + markup
-
-    const newBooking = {
-      id: `BK${Date.now()}${Math.floor(Math.random() * 1000)}`.slice(0, 12),
-      customerName: customerName.trim(),
-      email: email.trim().toLowerCase(),
-      contactNumber: contactNumber.trim(),
-      date,
-      basePay: base,
-      commissionAmount: comm,
-      markupAmount: mark,
-      totalRevenue,
-      netProfit,
-      platform: platform || "Direct",
-      status,
-      category,
-      createdAt: new Date().toISOString(),
+    const id = crypto.randomUUID();
+    const payload = {
+      p_booking_id: id,
+      p_customer_name: customerName.trim(),
+      p_email: email.trim().toLowerCase(),
+      p_contact_number: contactNumber.trim(),
+      p_booking_date: new Date(date).toISOString(),
+      p_category: category,
+      p_platform: platformNormalized,
+      p_base_pay: Number(basePay) || 0,
+      p_commission_amount: Number(commissionAmount) || 0,
+      p_markup_amount: Number(markupAmount) || 0,
+      p_total_revenue: Number((Number(basePay || 0) + Number(commissionAmount || 0) + Number(markupAmount || 0)).toFixed(2)),
+      p_status: status,
+      p_user_id: user.id,
     };
 
-    setBookings((prev) => [...prev, newBooking]);
-    toast.success("Booking added successfully!");
-    return newBooking;
+    setIsLoading(true);
+    try {
+      const { data, error } = await supabase.rpc("create_booking_transaction", payload);
+      if (error) throw error;
+
+      // Refresh list from view to include computed net_profit
+      const { data: fresh, error: fetchErr } = await supabase
+        .from("bookings_with_profit")
+        .select("*")
+        .eq("id", id)
+        .single();
+      if (fetchErr) {
+        console.warn("Fetch inserted booking failed:", fetchErr);
+      }
+      const mapped = fresh
+        ? fromRow(fresh)
+        : fromRow({
+            id,
+            customer_name: payload.p_customer_name,
+            email: payload.p_email,
+            contact_number: payload.p_contact_number,
+            booking_date: payload.p_booking_date,
+            category: payload.p_category,
+            platform: payload.p_platform,
+            status: payload.p_status,
+            base_pay: payload.p_base_pay,
+            commission_amount: payload.p_commission_amount,
+            markup_amount: payload.p_markup_amount,
+            total_revenue: payload.p_total_revenue,
+            user_id: payload.p_user_id,
+          });
+      setBookings((prev) => [mapped, ...prev]);
+      toast.success("Booking added successfully!");
+      // Refresh wallet balances and activity after atomic RPC completes
+      try {
+        await refreshWallets?.();
+        await refreshTransactions?.();
+      } catch (e) {
+        console.warn("Wallet refresh after addBooking failed:", e?.message || e);
+      }
+      return mapped;
+    } catch (err) {
+      console.error("Error adding booking and transaction:", err.message);
+      throw new Error(err.message || "Failed to add booking");
+    } finally {
+      setIsLoading(false);
+    }
   };
 
   // === REMOVE BOOKING ===
-  const removeBooking = (id) => {
+  const removeBooking = async (id) => {
     const booking = bookings.find(b => b.id === id);
     if (!booking) throw new Error("Booking not found");
 
+    const { error } = await supabase.from("bookings").delete().eq("id", id);
+    if (error) {
+      throw new Error(error.message || "Failed to delete booking");
+    }
     setBookings((prev) => prev.filter((b) => b.id !== id));
     toast.success(`Booking #${id} removed`);
   };
 
   // === UPDATE STATUS ONLY ===
-  const updateBookingStatus = (id, newStatus) => {
+  const updateBookingStatus = async (id, newStatus) => {
     if (!Object.values(STATUS).includes(newStatus))
       throw new Error("Invalid status");
+    const { error } = await supabase
+      .from("bookings")
+      .update({ status: newStatus })
+      .eq("id", id);
+    if (error) throw new Error(error.message || "Failed to update status");
+
+    // Refresh single row from view
+    const { data: updated } = await supabase
+      .from("bookings_with_profit")
+      .select("*")
+      .eq("id", id)
+      .single();
 
     setBookings((prev) =>
-      prev.map((b) => (b.id === id ? { ...b, status: newStatus } : b))
+      prev.map((b) => (b.id === id ? fromRow(updated || { ...b, status: newStatus }) : b))
     );
 
     const booking = bookings.find(b => b.id === id);
@@ -137,10 +241,17 @@ export const BookingProvider = ({ children }) => {
       : `${name}'s booking pending`;
 
     toast.success(msg);
+    // Ensure wallet view reflects any DB-side movements
+    try {
+      await refreshWallets?.();
+      await refreshTransactions?.();
+    } catch (e) {
+      console.warn("Wallet refresh after status update failed:", e?.message || e);
+    }
   };
 
   // === FULL UPDATE (Edit Booking) ===
-  const updateBooking = (updatedBooking) => {
+  const updateBooking = async (updatedBooking) => {
     const {
       id,
       basePay = 0,
@@ -150,34 +261,38 @@ export const BookingProvider = ({ children }) => {
       status,
       category,
     } = updatedBooking;
-
-    const base = Number(basePay);
-    const comm = Number(commissionAmount);
-    const mark = Number(markupAmount);
-
-    const totalRevenue = parseFloat((base + comm + mark).toFixed(2));
-    const netProfit = platform === "Direct"
-      ? parseFloat((base + mark).toFixed(2))
-      : parseFloat((comm + mark).toFixed(2));
-
-    const recalculated = {
+    const payload = toRow({
       ...updatedBooking,
-      basePay: base,
-      commissionAmount: comm,
-      markupAmount: mark,
-      totalRevenue,
-      netProfit,
-      platform: platform || "Direct",
-      status: status || STATUS.PENDING,
-      category: category || CATEGORY.FLIGHT,
-    };
+      basePay,
+      commissionAmount,
+      markupAmount,
+      platform,
+      status,
+      category,
+    });
+    const { error } = await supabase
+      .from("bookings")
+      .update(payload)
+      .eq("id", id);
+    if (error) throw new Error(error.message || "Failed to update booking");
 
-    setBookings((prev) =>
-      prev.map((b) => (b.id === id ? recalculated : b))
-    );
+    const { data: fresh } = await supabase
+      .from("bookings_with_profit")
+      .select("*")
+      .eq("id", id)
+      .single();
 
+    const mapped = fresh ? fromRow(fresh) : updatedBooking;
+    setBookings((prev) => prev.map((b) => (b.id === id ? mapped : b)));
     toast.success("Booking updated successfully!");
-    return recalculated;
+    // Refresh wallet balances/activity in case RPCs or triggers adjusted wallets
+    try {
+      await refreshWallets?.();
+      await refreshTransactions?.();
+    } catch (e) {
+      console.warn("Wallet refresh after updateBooking failed:", e?.message || e);
+    }
+    return mapped;
   };
 
   // === GET BY ID ===
@@ -217,7 +332,7 @@ export const BookingProvider = ({ children }) => {
         updateBooking,
         getBookingById,
         getStats,
-        isLoading: false,
+        isLoading,
         CATEGORY,
         STATUS,
       }}
