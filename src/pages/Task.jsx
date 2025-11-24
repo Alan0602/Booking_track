@@ -87,7 +87,7 @@ const Task = () => {
     const member = TEAM.find(m => m.id === assigneeId) || null;
 
     const newTask = {
-      id: Date.now(),
+      id: crypto.randomUUID(),
       title: title.trim(),
       dueDate,
       priority,
