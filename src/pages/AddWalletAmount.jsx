@@ -72,10 +72,10 @@ export default function AddWalletAmount() {
       const walletLabel = walletOptions.find(w => w.value === form.wallet)?.label || "Wallet";
 
       if (form.mode === "add") {
-        addToWallet(form.wallet, amount, form.name.trim());
+        await addToWallet(form.wallet, amount, form.name.trim());
         setSuccessMessage(`₹${amount.toFixed(2)} added to ${walletLabel}!`);
       } else {
-        deductFromWallet(form.wallet, amount, form.name.trim());
+        await deductFromWallet(form.wallet, amount, form.name.trim());
         setSuccessMessage(`₹${amount.toFixed(2)} deducted from ${walletLabel}!`);
       }
 
@@ -93,7 +93,7 @@ export default function AddWalletAmount() {
   };
 
   const recentTransactions = useMemo(() => {
-    return transactions
+    return (transactions || [])
       .filter(t => t.walletKey === form.wallet)
       .slice(-6)
       .reverse();
