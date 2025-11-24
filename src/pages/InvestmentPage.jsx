@@ -15,39 +15,93 @@ import {
   TrendingDown,
   Clock,
 } from "lucide-react";
+import { toast } from "react-hot-toast";
 import DashboardLayout from "../components/DashboardLayout";
-
-const STORAGE_KEY = "investment-tracker-v2";
+import supabase from "../utils/supabase";
+import { useAuth } from "../context/AuthContext";
+// WalletContext not needed for partner investments anymore
 
 export default function Investment() {
-  const [partners, setPartners] = useState(() => {
-    const saved = localStorage.getItem(STORAGE_KEY);
-    return saved
-      ? JSON.parse(saved)
-      : [];
-  });
+  const { user } = useAuth();
 
+  const [partners, setPartners] = useState([]);
   const [name, setName] = useState("");
   const [modal, setModal] = useState({ open: false, partner: null, type: "" });
   const [amount, setAmount] = useState("");
   const [editingId, setEditingId] = useState(null);
   const [tempName, setTempName] = useState("");
-  const [selectedPartner, setSelectedPartner] = useState(null);
+  const [selectedPartnerId, setSelectedPartnerId] = useState(null);
+  const [selectedPartnerHistory, setSelectedPartnerHistory] = useState([]);
+  const [recentActivityCount, setRecentActivityCount] = useState(0);
 
+  // Load partners and global activity count
   useEffect(() => {
-    localStorage.setItem(STORAGE_KEY, JSON.stringify(partners));
-  }, [partners]);
-
-  const addPartner = () => {
-    if (!name.trim()) return;
-    const newPartner = {
-      id: Date.now(),
-      name: name.trim(),
-      balance: 0,
-      history: [],
+    const run = async () => {
+      if (!user) {
+        setPartners([]);
+        setSelectedPartnerId(null);
+        setSelectedPartnerHistory([]);
+        setRecentActivityCount(0);
+        return;
+      }
+      await loadPartners();
+      await loadRecentActivityCount();
     };
-    setPartners([...partners, newPartner]);
+    run();
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [user?.id]);
+
+  const loadPartners = async () => {
+    const { data, error } = await supabase
+      .from("partners")
+      .select("id,name,balance,created_at")
+      .order("created_at", { ascending: false });
+    if (error) {
+      console.error("Failed to fetch partners:", error);
+      toast.error("Failed to load partners");
+      return;
+    }
+    setPartners((data || []).map((p) => ({
+      id: p.id,
+      name: p.name,
+      balance: Number(p.balance || 0),
+      created_at: p.created_at,
+    })));
+  };
+
+  const loadRecentActivityCount = async () => {
+    const { count, error } = await supabase
+      .from("partner_investments")
+      .select("id", { count: "exact", head: true })
+      .eq("user_id", user.id);
+    if (error) {
+      console.warn("Failed to load activity count:", error);
+      return;
+    }
+    setRecentActivityCount(count || 0);
+  };
+
+  const addPartner = async () => {
+    if (!name.trim()) return;
+    const payload = { user_id: user?.id, name: name.trim(), balance: 0 };
+    const { data, error } = await supabase
+      .from("partners")
+      .insert([payload])
+      .select("id,name,balance,created_at")
+      .single();
+    if (error) {
+      console.error("Add partner failed:", error);
+      toast.error("Failed to add partner");
+      return;
+    }
+    setPartners((prev) => [{
+      id: data.id,
+      name: data.name,
+      balance: Number(data.balance || 0),
+      created_at: data.created_at,
+    }, ...prev]);
     setName("");
+    toast.success("Partner added");
   };
 
   const startEdit = (id, current) => {
@@ -55,12 +109,22 @@ export default function Investment() {
     setTempName(current);
   };
 
-  const saveEdit = () => {
+  const saveEdit = async () => {
     if (!tempName.trim()) return;
-    setPartners(partners.map(p =>
+    const { error } = await supabase
+      .from("partners")
+      .update({ name: tempName.trim() })
+      .eq("id", editingId);
+    if (error) {
+      console.error("Rename partner failed:", error);
+      toast.error("Failed to rename partner");
+      return;
+    }
+    setPartners((prev) => prev.map((p) =>
       p.id === editingId ? { ...p, name: tempName.trim() } : p
     ));
     setEditingId(null);
+    toast.success("Partner renamed");
   };
 
   const openModal = (partner, type) => {
@@ -73,50 +137,122 @@ export default function Investment() {
     setAmount("");
   };
 
-  const execute = () => {
+  const execute = async () => {
     const value = Number(amount);
     if ((modal.type === "add" || modal.type === "withdraw") && (!amount || value <= 0)) return;
 
-    const timestamp = new Date().toLocaleString("en-IN", {
-      day: "2-digit",
-      month: "short",
-      year: "numeric",
-      hour: "2-digit",
-      minute: "2-digit",
-    });
+    if (!user || !modal?.partner?.id) {
+      toast.error("Missing user or partner");
+      return;
+    }
 
-    const transaction = {
-      id: Date.now(),
-      type: modal.type,
-      amount: value,
-      timestamp,
+    const investmentId = crypto.randomUUID();
+    const payload = {
+      p_investment_id: investmentId,
+      p_partner_id: modal.partner.id,
+      p_user_id: user.id,
+      p_type: modal.type,
+      p_amount: value,
+      p_note: null,
     };
 
-    setPartners(partners.map(p => {
-      if (p.id === modal.partner.id) {
-        const newBalance = modal.type === "add"
-          ? p.balance + value
-          : p.balance - value;
+    const { data, error } = await supabase.rpc("create_partner_investment", payload);
+    if (error) {
+      console.error("Investment RPC failed:", error);
+      toast.error(error.message || "Transaction failed");
+      return;
+    }
 
-        return {
-          ...p,
-          balance: newBalance,
-          history: [transaction, ...p.history],
-        };
-      }
-      return p;
-    }));
+    // Refresh partners (balances) and history for selected partner
+    await loadPartners();
+    if (selectedPartnerId === modal.partner.id) {
+      await loadPartnerHistory(modal.partner.id);
+    }
+    // No wallet linkage — only refresh partners and activity
+    await loadRecentActivityCount();
 
+    toast.success(
+      modal.type === "add" ? "Investment added" : "Amount withdrawn"
+    );
     closeModal();
   };
 
-  const deletePartner = (id) => {
-    setPartners(partners.filter(p => p.id !== id));
-    if (selectedPartner?.id === id) setSelectedPartner(null);
+  const deletePartner = async (id) => {
+    if (!id) return;
+    // Try direct delete; if blocked by FK, delete investments first, then partner
+    const tryDelete = async () => {
+      const { error } = await supabase.from("partners").delete().eq("id", id);
+      return error;
+    };
+    let err = await tryDelete();
+    if (err) {
+      // Attempt to delete child investments, then delete partner
+      const { error: invDelErr } = await supabase
+        .from("partner_investments")
+        .delete()
+        .eq("partner_id", id);
+      if (invDelErr) {
+        console.error("Delete partner investments failed:", invDelErr);
+        toast.error("Cannot delete partner with investments");
+        return;
+      }
+      err = await tryDelete();
+      if (err) {
+        console.error("Delete partner failed:", err);
+        toast.error("Failed to delete partner");
+        return;
+      }
+    }
+    setPartners((prev) => prev.filter((p) => p.id !== id));
+    if (selectedPartnerId === id) {
+      setSelectedPartnerId(null);
+      setSelectedPartnerHistory([]);
+    }
+    await loadRecentActivityCount();
+    toast.success("Partner deleted");
   };
 
-  const totalInvested = partners.reduce((sum, p) => sum + p.balance, 0);
+  const totalInvested = partners.reduce((sum, p) => sum + Number(p.balance || 0), 0);
   const totalPartners = partners.length;
+
+  const selectedPartner = partners.find((p) => p.id === selectedPartnerId) || null;
+
+  const loadPartnerHistory = async (partnerId) => {
+    const { data, error } = await supabase
+      .from("partner_investments")
+      .select("id,partner_id,type,amount,note,created_at")
+      .eq("partner_id", partnerId)
+      .order("created_at", { ascending: false });
+    if (error) {
+      console.error("Failed to fetch history:", error);
+      toast.error("Failed to load history");
+      return;
+    }
+    setSelectedPartnerHistory((data || []).map((tx) => ({
+      id: tx.id,
+      type: tx.type,
+      amount: Number(tx.amount || 0),
+      timestamp: tx.created_at,
+      note: tx.note || null,
+    })));
+  };
+
+  const handleDeleteInvestment = async (investmentId) => {
+    if (!investmentId || !user?.id || !selectedPartnerId) return;
+    const { error } = await supabase.rpc("delete_partner_investment", {
+      p_investment_id: investmentId,
+      p_user_id: user.id,
+    });
+    if (error) {
+      console.error("Delete investment failed:", error);
+      toast.error(error.message || "Failed to delete investment");
+      return;
+    }
+    await loadPartners();
+    await loadPartnerHistory(selectedPartnerId);
+    await loadRecentActivityCount();
+    toast.success("Investment deleted");
+  };
 
   return (
     <DashboardLayout>
@@ -178,9 +314,7 @@ export default function Investment() {
               <div className="flex items-center justify-between">
                 <div>
                   <p className="text-sm text-gray-600">Recent Activity</p>
-                  <p className="text-3xl font-bold text-amber-600">
-                    {partners.flatMap(p => p.history).length}
-                  </p>
+                  <p className="text-3xl font-bold text-amber-600">{recentActivityCount}</p>
                 </div>
                 <div className="p-3 bg-gradient-to-br from-amber-100 to-orange-100 rounded-2xl">
                   <History className="w-6 h-6 text-amber-600" />
@@ -291,17 +425,17 @@ export default function Investment() {
                             <h3 className="text-2xl font-bold text-gray-800">{p.name}</h3>
                           )}
                           <p className="text-sm text-gray-500 mt-1">
-                            {p.history.length} transaction{p.history.length !== 1 ? "s" : ""}
+                            {selectedPartnerId === p.id ? selectedPartnerHistory.length : "—"} transaction
                           </p>
                         </div>
                         <button
-                          onClick={() => setSelectedPartner(p)}
+                          onClick={async () => { setSelectedPartnerId(p.id); await loadPartnerHistory(p.id); }}
                           className={`px-4 py-2 rounded-xl text-sm font-medium transition-all ${
-                            selectedPartner?.id === p.id
+                            selectedPartnerId === p.id
                               ? "bg-gradient-to-r from-indigo-500 to-purple-600 text-white"
                               : "bg-gray-100 text-gray-600 hover:bg-gray-200"
                           }`}
-                        >
+                          >
                           View History
                         </button>
                       </div>
@@ -365,14 +499,14 @@ export default function Investment() {
 
                   <AnimatePresence mode="wait">
                     {selectedPartner ? (
-                      selectedPartner.history.length > 0 ? (
+                      selectedPartnerHistory.length > 0 ? (
                         <motion.div
                           initial={{ opacity: 0 }}
                           animate={{ opacity: 1 }}
                           exit={{ opacity: 0 }}
                           className="space-y-3 max-h-96 overflow-y-auto pr-2"
                         >
-                          {selectedPartner.history.map((tx) => (
+                          {selectedPartnerHistory.map((tx) => (
                             <motion.div
                               key={tx.id}
                               layout
@@ -401,7 +535,13 @@ export default function Investment() {
                                   </p>
                                   <p className="text-xs text-gray-500 flex items-center gap-1">
                                     <Clock className="w-3 h-3" />
-                                    {tx.timestamp}
+                                    {new Date(tx.timestamp).toLocaleString("en-IN", {
+                                      day: "2-digit",
+                                      month: "short",
+                                      year: "numeric",
+                                      hour: "2-digit",
+                                      minute: "2-digit",
+                                    })}
                                   </p>
                                 </div>
                               </div>
@@ -410,6 +550,13 @@ export default function Investment() {
                               }`}>
                                 {tx.type === "add" ? "+" : "-"}₹{tx.amount.toLocaleString("en-IN")}
                               </p>
+                              <button
+                                onClick={() => handleDeleteInvestment(tx.id)}
+                                className="ml-3 p-2 bg-rose-100 rounded-xl hover:bg-rose-200"
+                                title="Delete investment"
+                              >
+                                <Trash2 className="w-4 h-4 text-rose-600" />
+                              </button>
                             </motion.div>
                           ))}
                         </motion.div>
