@@ -1,6 +1,8 @@
 // src/context/WalletContext.jsx
 import { createContext, useContext, useState, useEffect } from "react";
 import { toast } from "react-hot-toast";
+import supabase from "../utils/supabase";
+import { useAuth } from "./AuthContext";
 
 const WalletContext = createContext();
 
@@ -29,99 +31,162 @@ export const WALLET_KEYS = {
 // PROVIDER
 // ──────────────────────────────────────────────────────────────
 export const WalletProvider = ({ children }) => {
-  const defaultWallets = { alhind: 0, akbar: 0, office: 0 };
+  const { user } = useAuth();
 
-  const [wallets, setWallets] = useState(() => {
-    const saved = localStorage.getItem("wallets");
-    if (saved) {
-      try {
-        const parsed = JSON.parse(saved);
-        return {
-          alhind: Number(parsed.alhind) || 0,
-          akbar: Number(parsed.akbar) || 0,
-          office: Number(parsed.office) || 0,
-        };
-      } catch {
-        return defaultWallets;
-      }
+  // Local view of balances keyed by internal keys
+  const [wallets, setWallets] = useState({ alhind: 0, akbar: 0, office: 0 });
+  // Index of wallets in Supabase: name -> { id, name, balance }
+  const [walletIndex, setWalletIndex] = useState({});
+  const [loading, setLoading] = useState(true);
+  const [transactions, setTransactions] = useState([]);
+
+  // Mapping between internal keys and Supabase wallet names
+  const WALLET_NAME_MAP = {
+    [WALLET_KEYS.ALHIND]: "AlHind",
+    [WALLET_KEYS.AKBAR]: "Akbar",
+    [WALLET_KEYS.OFFICE]: "Office-Funds",
+  };
+
+  const NAME_TO_KEY = {
+    AlHind: WALLET_KEYS.ALHIND,
+    Akbar: WALLET_KEYS.AKBAR,
+    "Office-Funds": WALLET_KEYS.OFFICE,
+  };
+
+  const loadWallets = async () => {
+    if (!user) {
+      setWallets({ alhind: 0, akbar: 0, office: 0 });
+      setWalletIndex({});
+      setLoading(false);
+      return;
     }
-    return defaultWallets;
-  });
+    setLoading(true);
+    const { data, error } = await supabase
+      .from("wallets")
+      .select("id,name,balance")
+      .order("created_at", { ascending: true });
 
-  const [transactions, setTransactions] = useState(() => {
-    const saved = localStorage.getItem("walletTransactions");
-    return saved ? JSON.parse(saved) : [];
-  });
+    if (error) {
+      console.error("Failed to fetch wallets:", error);
+      toast.error("Failed to load wallets");
+      setLoading(false);
+      return;
+    }
 
-  // ──────────────────────────────────────────────────────────────
-  // PERSISTENCE
-  // ──────────────────────────────────────────────────────────────
-  useEffect(() => {
-    localStorage.setItem("wallets", JSON.stringify(wallets));
-  }, [wallets]);
-
-  useEffect(() => {
-    localStorage.setItem("walletTransactions", JSON.stringify(transactions));
-  }, [transactions]);
-
-  // ──────────────────────────────────────────────────────────────
-  // CORE: UPDATE
-  // ──────────────────────────────────────────────────────────────
-  const updateWallet = (key, amount, op = "add") => {
-    setWallets((prev) => {
-      const current = Number(prev[key] ?? 0);
-      const delta = Number(amount) || 0;
-      const updated = op === "add" ? current + delta : current - delta;
-      return { ...prev, [key]: Math.max(0, updated) };
+    const index = {};
+    const next = { alhind: 0, akbar: 0, office: 0 };
+    (data || []).forEach((w) => {
+      index[w.name] = { id: w.id, name: w.name, balance: Number(w.balance || 0) };
+      const key = NAME_TO_KEY[w.name];
+      if (key) {
+        if (key === WALLET_KEYS.ALHIND) next.alhind = Number(w.balance || 0);
+        if (key === WALLET_KEYS.AKBAR) next.akbar = Number(w.balance || 0);
+        if (key === WALLET_KEYS.OFFICE) next.office = Number(w.balance || 0);
+      }
     });
+
+    setWalletIndex(index);
+    setWallets(next);
+    setLoading(false);
+    // Refresh transactions after wallets index is ready (id→key mapping)
+    await loadTransactions();
   };
 
-  const addToWallet = (key, amount, user = "System", meta = {}) => {
-    if (!key || amount <= 0) return;
-    updateWallet(key, amount, "add");
-    logTransaction(key, amount, "credit", user, meta);
+  useEffect(() => {
+    loadWallets();
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [user?.id]);
+
+  const loadTransactions = async (limit = 100) => {
+    if (!user) {
+      setTransactions([]);
+      return;
+    }
+    // Build wallet id → key map from walletIndex
+    const idToKey = {};
+    Object.entries(walletIndex).forEach(([name, obj]) => {
+      const k = NAME_TO_KEY[name];
+      if (k && obj?.id) idToKey[obj.id] = k;
+    });
+
+    const { data, error } = await supabase
+      .from("wallet_transactions")
+      .select("id,wallet_id,amount,created_at,created_by,description")
+      .order("created_at", { ascending: false })
+      .limit(limit);
+
+    if (error) {
+      console.error("Failed to fetch wallet transactions:", error);
+      toast.error("Failed to load wallet activity");
+      return;
+    }
+
+    const mapped = (data || []).map((row) => ({
+      id: row.id,
+      walletKey: idToKey[row.wallet_id] || null,
+      operation: Number(row.amount) >= 0 ? "credit" : "debit",
+      amount: Math.abs(Number(row.amount || 0)),
+      user: row.created_by || "User",
+      timestamp: row.created_at,
+      description: row.description,
+    }));
+
+    setTransactions(mapped);
+  };
+  const recordTransaction = async (key, delta, meta = {}, actor = "System") => {
+    const name = WALLET_NAME_MAP[key];
+    const wallet = name ? walletIndex[name] : undefined;
+    if (!wallet || !wallet.id) {
+      const msg = `Wallet not found for key: ${String(key)}`;
+      toast.error(msg);
+      throw new Error(msg);
+    }
+    const amount = Number(delta || 0);
+    if (amount === 0) return;
+    const payload = {
+      wallet_id: wallet.id,
+      booking_id: meta.bookingId || null,
+      amount,
+      description: meta.description || meta.action || "Wallet transaction",
+      created_by: user?.id || null,
+    };
+    const { error } = await supabase.from("wallet_transactions").insert([payload]);
+    if (error) {
+      console.error("Wallet transaction failed:", error);
+      throw new Error(error.message || "Failed to record transaction");
+    }
+    await loadWallets();
+    await loadTransactions();
   };
 
-  const deductFromWallet = (key, amount, user = "System", meta = {}) => {
-    if (!key || amount <= 0) return;
+  const addToWallet = async (key, amount, actor = "System", meta = {}) => {
+    if (!key || Number(amount) <= 0) return;
+    await recordTransaction(key, Math.abs(Number(amount)), meta, actor);
+    toast.success(`₹${Number(amount).toFixed(2)} credited to ${key}`);
+  };
+
+  const deductFromWallet = async (key, amount, actor = "System", meta = {}) => {
+    if (!key || Number(amount) <= 0) return;
     const current = Number(wallets[key] ?? 0);
-    if (current < amount) {
+    if (current < Number(amount)) {
       const msg = `Insufficient balance in ${key}. Available: ₹${current.toFixed(2)}`;
       toast.error(msg);
       throw new Error(msg);
     }
-    updateWallet(key, amount, "deduct");
-    logTransaction(key, amount, "debit", user, meta);
+    await recordTransaction(key, -Math.abs(Number(amount)), meta, actor);
+    toast.success(`₹${Number(amount).toFixed(2)} debited from ${key}`);
   };
 
-  const logTransaction = (key, amount, op, user, meta) => {
-    setTransactions((prev) => [
-      ...prev,
-      {
-        id: Date.now() + Math.random(),
-        walletKey: key,
-        amount: Number(amount),
-        operation: op,
-        user,
-        timestamp: new Date().toISOString(),
-        ...meta,
-      },
-    ]);
-  };
-
-  // ──────────────────────────────────────────────────────────────
-  // APPLY ON CONFIRM
-  // ──────────────────────────────────────────────────────────────
-  const applyBookingWallet = (booking, user = "Confirm Booking") => {
+  
+  const applyBookingWallet = async (booking, actor = "Confirm Booking") => {
     if (!booking) return;
-
-    const base = booking.basePay || 0;
-    const markup = booking.markupAmount || 0;
+    const base = Number(booking.basePay || 0);
+    const markup = Number(booking.markupAmount || 0);
     const officeIncome = base + markup;
 
     if (booking.platform === PLATFORM.DIRECT) {
       if (officeIncome > 0) {
-        addToWallet(WALLET_KEYS.OFFICE, officeIncome, user, {
+        await addToWallet(WALLET_KEYS.OFFICE, officeIncome, actor, {
           bookingId: booking.id,
           action: "apply_direct",
           description: "Direct: base + markup → Office",
@@ -140,14 +205,14 @@ export const WalletProvider = ({ children }) => {
     const meta = { bookingId: booking.id, action: "apply" };
 
     if (platformKey) {
-      if (base > 0) deductFromWallet(platformKey, base, user, { ...meta, type: "base_pay" });
+      if (base > 0) await deductFromWallet(platformKey, base, actor, { ...meta, type: "base_pay" });
       if (booking.commissionAmount > 0) {
-        addToWallet(platformKey, booking.commissionAmount, user, { ...meta, type: "commission" });
+        await addToWallet(platformKey, Number(booking.commissionAmount), actor, { ...meta, type: "commission" });
       }
     }
 
     if (officeIncome > 0) {
-      addToWallet(WALLET_KEYS.OFFICE, officeIncome, user, {
+      await addToWallet(WALLET_KEYS.OFFICE, officeIncome, actor, {
         ...meta,
         description: "Office profit: base + markup",
       });
@@ -157,16 +222,15 @@ export const WalletProvider = ({ children }) => {
   // ──────────────────────────────────────────────────────────────
   // REFUND ON UN-CONFIRM
   // ──────────────────────────────────────────────────────────────
-  const refundBookingWallet = (booking, user = "Unconfirm") => {
+  const refundBookingWallet = async (booking, actor = "Unconfirm") => {
     if (!booking) return;
-
-    const base = booking.basePay || 0;
-    const markup = booking.markupAmount || 0;
+    const base = Number(booking.basePay || 0);
+    const markup = Number(booking.markupAmount || 0);
     const officeRefund = base + markup;
 
     if (booking.platform === PLATFORM.DIRECT) {
       if (officeRefund > 0) {
-        deductFromWallet(WALLET_KEYS.OFFICE, officeRefund, user, {
+        await deductFromWallet(WALLET_KEYS.OFFICE, officeRefund, actor, {
           bookingId: booking.id,
           action: "refund_direct",
           description: "Refund: base + markup → Office",
@@ -185,14 +249,14 @@ export const WalletProvider = ({ children }) => {
     const meta = { bookingId: booking.id, action: "refund_unconfirm" };
 
     if (platformKey) {
-      if (base > 0) addToWallet(platformKey, base, user, { ...meta, type: "base_refund" });
+      if (base > 0) await addToWallet(platformKey, base, actor, { ...meta, type: "base_refund" });
       if (booking.commissionAmount > 0) {
-        deductFromWallet(platformKey, booking.commissionAmount, user, { ...meta, type: "commission_refund" });
+        await deductFromWallet(platformKey, Number(booking.commissionAmount), actor, { ...meta, type: "commission_refund" });
       }
     }
 
     if (officeRefund > 0) {
-      deductFromWallet(WALLET_KEYS.OFFICE, officeRefund, user, {
+      await deductFromWallet(WALLET_KEYS.OFFICE, officeRefund, actor, {
         ...meta,
         description: "Refund: base + markup → Office",
       });
@@ -202,16 +266,16 @@ export const WalletProvider = ({ children }) => {
   // ──────────────────────────────────────────────────────────────
   // FULL REFUND ON DELETE
   // ──────────────────────────────────────────────────────────────
-  const refundBookingOnDelete = (booking, user = "Delete Booking") => {
+  const refundBookingOnDelete = async (booking, actor = "Delete Booking") => {
     if (!booking) return;
 
-    const base = booking.basePay || 0;
-    const markup = booking.markupAmount || 0;
+    const base = Number(booking.basePay || 0);
+    const markup = Number(booking.markupAmount || 0);
     const officeRefund = base + markup;
 
     if (booking.platform === PLATFORM.DIRECT) {
       if (officeRefund > 0) {
-        deductFromWallet(WALLET_KEYS.OFFICE, officeRefund, user, {
+        await deductFromWallet(WALLET_KEYS.OFFICE, officeRefund, actor, {
           bookingId: booking.id,
           action: "refund_delete_direct",
           description: "Delete refund: base + markup",
@@ -230,14 +294,14 @@ export const WalletProvider = ({ children }) => {
     const meta = { bookingId: booking.id, action: "refund_on_delete" };
 
     if (platformKey) {
-      if (base > 0) addToWallet(platformKey, base, user, { ...meta, type: "base_refund" });
+      if (base > 0) await addToWallet(platformKey, base, actor, { ...meta, type: "base_refund" });
       if (booking.commissionAmount > 0) {
-        deductFromWallet(platformKey, booking.commissionAmount, user, { ...meta, type: "commission_refund" });
+        await deductFromWallet(platformKey, Number(booking.commissionAmount), actor, { ...meta, type: "commission_refund" });
       }
     }
 
     if (officeRefund > 0) {
-      deductFromWallet(WALLET_KEYS.OFFICE, officeRefund, user, {
+      await deductFromWallet(WALLET_KEYS.OFFICE, officeRefund, actor, {
         ...meta,
         description: "Delete refund: base + markup",
       });
@@ -258,7 +322,7 @@ export const WalletProvider = ({ children }) => {
   const walletData = [
     { name: "AlHind", amount: getWallet("alhind"), key: "alhind", formatted: formatWallet("alhind") },
     { name: "Akbar", amount: getWallet("akbar"), key: "akbar", formatted: formatWallet("akbar") },
-    { name: "Office Fund", amount: getWallet("office"), key: "office", formatted: formatWallet("office") },
+    { name: "Office-Funds", amount: getWallet("office"), key: "office", formatted: formatWallet("office") },
   ];
 
   // ──────────────────────────────────────────────────────────────
@@ -304,7 +368,10 @@ export const WalletProvider = ({ children }) => {
       value={{
         walletData,
         wallets,
+        loading,
         transactions,
+        refreshTransactions: loadTransactions,
+        refreshWallets: loadWallets,
         addToWallet,
         deductFromWallet,
         applyBookingWallet,
