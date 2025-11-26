@@ -105,31 +105,15 @@ const AllBookings = () => {
 
   // === HANDLE STATUS CHANGE WITH WALLET LOGIC ===
   const handleStatusChange = (id, currentStatus) => {
-    const booking = bookings.find(b => b.id === id);
-    if (!booking) return;
-
     const nextStatus = currentStatus === STATUS.CONFIRMED ? STATUS.PENDING : STATUS.CONFIRMED;
-
-    // If going from CONFIRMED → PENDING
-    if (currentStatus === STATUS.CONFIRMED && nextStatus === STATUS.PENDING) {
-      refundBookingWallet(booking, "User"); // Refund platform + office
-    }
-
-    // If going from PENDING → CONFIRMED
-    if (currentStatus === STATUS.PENDING && nextStatus === STATUS.CONFIRMED) {
-      applyBookingWallet(booking, "User"); // Apply platform + office
-    }
-
+    // Wallet logic is now handled by backend RPCs in updateBookingStatus
     updateBookingStatus(id, nextStatus);
   };
 
   // === HANDLE DELETE WITH FULL REFUND ===
   const handleRemove = (id) => {
-    const booking = bookings.find(b => b.id === id);
-    if (!booking) return;
-
     if (window.confirm("Delete this booking? All wallet entries will be refunded.")) {
-      refundBookingOnDelete(booking, "User");
+      // Wallet logic is now handled by backend RPCs in removeBooking
       removeBooking(id);
     }
   };
@@ -186,7 +170,7 @@ const AllBookings = () => {
               { label: "Total", value: stats.total, icon: Package, gradient: darkMode ? "from-blue-600 to-blue-700" : "from-blue-500 to-blue-600" },
               { label: "Confirmed", value: stats.confirmed, icon: Calendar, gradient: darkMode ? "from-emerald-600 to-emerald-700" : "from-green-500 to-emerald-600" },
               { label: "Pending", value: stats.pending, icon: Users, gradient: darkMode ? "from-orange-600 to-orange-700" : "from-amber-500 to-orange-600" },
-              { label: "Revenue", value: `₹${stats.revenue.toLocaleString()}`, icon:IndianRupee, gradient: darkMode ? "from-purple-600 to-indigo-700" : "from-purple-500 to-indigo-600" },
+              { label: "Revenue", value: `₹${stats.revenue.toLocaleString()}`, icon: IndianRupee, gradient: darkMode ? "from-purple-600 to-indigo-700" : "from-purple-500 to-indigo-600" },
               { label: "Net Profit", value: `₹${stats.netProfit.toLocaleString()}`, icon: TrendingUp, gradient: stats.netProfit >= 0 ? (darkMode ? "from-emerald-600 to-emerald-700" : "from-green-500 to-emerald-600") : (darkMode ? "from-red-600 to-red-700" : "from-red-500 to-rose-600") },
             ].map((stat, idx) => (
               <div key={idx} className={`bg-gradient-to-br ${stat.gradient} p-6 rounded-xl text-white shadow-lg hover:shadow-xl transform hover:-translate-y-1 transition-all duration-300`}>

@@ -14,10 +14,10 @@ import { toast } from "react-hot-toast";
 
 const categories = [
   { value: CATEGORY.FLIGHT, label: "Flight", icon: Plane, color: "bg-blue-100 text-blue-700" },
-  { value: CATEGORY.BUS,    label: "Bus",    icon: Bus,     color: "bg-emerald-100 text-emerald-700" },
-  { value: CATEGORY.TRAIN,  label: "Train",  icon: Train,   color: "bg-purple-100 text-purple-700" },
-  { value: CATEGORY.CAB,    label: "Cab",    icon: Car,     color: "bg-orange-100 text-orange-700" },
-  { value: CATEGORY.HOTEL,  label: "Hotel",  icon: Hotel,   color: "bg-pink-100 text-pink-700" },
+  { value: CATEGORY.BUS, label: "Bus", icon: Bus, color: "bg-emerald-100 text-emerald-700" },
+  { value: CATEGORY.TRAIN, label: "Train", icon: Train, color: "bg-purple-100 text-purple-700" },
+  { value: CATEGORY.CAB, label: "Cab", icon: Car, color: "bg-orange-100 text-orange-700" },
+  { value: CATEGORY.HOTEL, label: "Hotel", icon: Hotel, color: "bg-pink-100 text-pink-700" },
 ];
 
 const platforms = [
@@ -94,7 +94,7 @@ export default function EditBooking() {
       commissionAmount: booking.commissionAmount?.toString() || "",
       markupAmount: booking.markupAmount?.toString() || "",
       platform: booking.platform || "",
-African: booking.status || STATUS.PENDING,
+      African: booking.status || STATUS.PENDING,
       category: booking.category || CATEGORY.FLIGHT,
     });
   }, [id, getBookingById, navigate]);
@@ -184,25 +184,34 @@ African: booking.status || STATUS.PENDING,
 
       const user = form.customerName.trim() || "Editor";
 
-      // === STEP 1: Reverse old wallet effect if it was confirmed ===
-      if (oldBooking.status === STATUS.CONFIRMED) {
-        refundBookingWallet(oldBooking, user); // Correct function
-        toast.success("Old wallet entries reversed");
-      }
+      // === STEP 1 & 2: Financial logic is now handled by Backend RPCs ===
+      // The updateBooking function in BookingContext needs to handle this, 
+      // or we rely on the fact that if status changed, we should use updateBookingStatus logic.
+      // However, for EDIT, we might change amounts too.
+      // Ideally, we should have a backend RPC for 'update_booking_transaction'.
+      // For now, let's assume the user will use the Dashboard to toggle status if they want pure reversal.
+      // But if they change amounts here, we need to handle it.
 
-      // === STEP 2: Apply new wallet logic if now confirmed ===
-      if (isConfirmed) {
-        const newBookingData = {
-          ...oldBooking,
-          basePay: base,
-          commissionAmount: comm,
-          markupAmount: mark,
-          platform: form.platform || PLATFORM.DIRECT,
-          status: STATUS.CONFIRMED,
-        };
-        applyBookingWallet(newBookingData, user);
-        toast.success("New wallet entries applied");
-      }
+      // CRITICAL: If we just update the row, the wallet won't change (unless we add a trigger).
+      // Since I haven't added a trigger for UPDATE in SQL, we need a way to handle this.
+      // BUT, the user's issue was DOUBLE deduction.
+      // If I remove this, and there is NO backend trigger, then NO wallet change happens on Edit.
+      // That is also bad.
+
+      // WAIT: The user said "unconfirm or delete".
+      // If they use Edit Page to Unconfirm, this code runs.
+      // If they use Dashboard to Unconfirm, AllBookings code runs.
+
+      // I removed frontend logic from AllBookings.
+      // Now AllBookings uses RPC.
+
+      // For EditBooking:
+      // If I remove this, and use updateBooking (which is just DB update), 
+      // then changing status here WON'T update wallet.
+
+      // SOLUTION: We need updateBooking in BookingContext to ALSO use RPCs.
+      // I will remove this frontend logic here, and then update BookingContext.jsx to handle it.
+
 
       // === STEP 3: Build edit history ===
       const changes = [];
